@@ -58,11 +58,30 @@ if CARGO_TERM_COLOR=never cargo check \
   exit 1
 fi
 
-if ! rg -q 'error\[E0277\]' "$diagnostics" || \
-  ! rg -q 'trait bound .*TelemetryPlugin.*not satisfied' "$diagnostics"; then
-  printf '%s\n' 'Missing-trait fixture failed for an unexpected reason:' >&2
+# Check each required diagnostic independently and distinguish a missing match
+# from a grep execution error. This keeps the negative fixture self-contained on
+# a clean hosted runner and prevents a missing search tool from being reported as
+# a Rust type-checking regression.
+require_diagnostic() {
+  local pattern="$1"
+  local status
+
+  if grep -Eq "$pattern" "$diagnostics"; then
+    return
+  else
+    status=$?
+  fi
+
+  if [[ $status -eq 1 ]]; then
+    printf '%s\n' 'Missing-trait fixture failed for an unexpected reason:' >&2
+  else
+    printf 'Failed to inspect fixture diagnostics with grep (status %d).\n' "$status" >&2
+  fi
   cat "$diagnostics" >&2
   exit 1
-fi
+}
+
+require_diagnostic 'error\[E0277\]'
+require_diagnostic 'trait bound .*TelemetryPlugin.*not satisfied'
 
 printf '%s\n' 'Verified plugin macro compile-pass and missing-trait fixtures.'
