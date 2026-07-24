@@ -1,8 +1,8 @@
-# ETS2 Dispatch
+# SCS SDK Rust Crates
 
 **English** | [简体中文](README.zh.md)
 
-The long-term goal of ETS2 Dispatch is to provide Euro Truck Simulator 2 with an external web dashboard, navigation data, and dispatch capabilities. The repository currently focuses exclusively on the **SCS Telemetry SDK foundation**: first complete the official SDK 1.14 ABI, typed wrapper, plugin lifecycle, and cross-platform build pipeline; the bridge, web interface, and dispatch product come later.
+Typed Rust bindings and a safe plugin framework for the SCS Software SDK. The current workspace covers the complete public Telemetry SDK 1.14 surface and includes a real ETS2 plugin example for validating the application boundary and cross-platform loader artifacts. Product-specific telemetry consumers belong in separate repositories.
 
 The current foundation is implemented entirely in Rust and requires no C++ shim, CMake, or bindgen. The original official SDK distribution remains in `third-party/scs_sdk_1_14/` as the authoritative source for the ABI and constants.
 
@@ -49,7 +49,7 @@ The `ALL` catalogs are not another set of manually copied strings. `scs-sdk-sys`
 ## Four-layer architecture
 
 ```text
-apps/plugin-rust
+examples/telemetry-plugin
         |
         | safe TelemetryPlugin API
         v
@@ -129,9 +129,9 @@ Registration contexts use `Arc<Registration>` to hold stable pointees and `Atomi
 The runtime emits product and compatibility identity before product initialization, then reports the committed subscription counts. `game_display_name` is the complete display string supplied by SCS, while the API and schema versions remain separate typed fields:
 
 ```text
-[scs-sdk-plugin] starting plugin name="ETS2 Dispatch Telemetry" version="0.1.0" framework_version="0.1.0"
+[scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" version="0.1.0" framework_version="0.1.0"
 [scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
-[scs-sdk-plugin] initialized plugin name="ETS2 Dispatch Telemetry" version="0.1.0" events=6 channels=8
+[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.0" events=6 channels=8
 ```
 
 ### `scs-sdk-plugin-macros`
@@ -139,7 +139,7 @@ The runtime emits product and compatibility identity before product initializati
 `crates/scs-sdk-plugin-macros/` provides:
 
 ```rust
-scs_sdk_plugin::export_plugin!(DispatchPlugin::default());
+scs_sdk_plugin::export_plugin!(TelemetryExample::default());
 ```
 
 The macro generates the two symbols discovered by the SCS loader:
@@ -205,9 +205,9 @@ The different index concepts remain distinct:
 
 Explicit intent does not push resource management into the product. The runtime commits registrations only after the plugin returns successfully. If any SDK call fails, previously registered items are unregistered in reverse order. Normal shutdown follows the same reverse-order rule.
 
-## Application plugin boundary
+## Example plugin boundary
 
-`apps/plugin-rust/` is the current in-game probe and the framework's boundary example. It depends only on `scs-sdk-plugin`, explicitly subscribes to the six event classes and eight channels it currently needs, then uses typed callbacks to update a snapshot and record job configuration and gameplay events.
+`examples/telemetry-plugin/` is a real in-game probe and the framework's application-boundary example. It depends only on `scs-sdk-plugin`, explicitly subscribes to six event classes and eight channels, then uses typed callbacks to update a snapshot and record job configuration and gameplay events.
 
 Source in this directory targets:
 
@@ -229,18 +229,18 @@ The script audits both Rust source and `Cargo.toml`, preventing the application 
 ## Workspace
 
 ```text
-apps/plugin-rust/               safe Rust in-game probe cdylib
 crates/scs-sdk-sys/             SDK 1.14 raw x86-64 ABI
 crates/scs-sdk/                 no_std typed wrapper and complete catalogs
 crates/scs-sdk-plugin/          safe plugin lifecycle framework
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
   tests/fixtures/export-plugin/ isolated macro compile-pass/fail cdylib workspace
+examples/telemetry-plugin/      safe Rust in-game example cdylib
 scripts/                        Windows/Linux/macOS builds and artifact verification
 third-party/scs_sdk_1_14/       original official SDK distribution and license
 tmp/                            local investigations, log conclusions, and design notes
 ```
 
-`apps/bridge/`, `apps/web/`, `crates/dispatcher/`, `crates/protocol/`, `crates/savegame/`, `crates/telemetry/`, `assets/`, and `fixtures/` are reserved for later product phases. They are not currently members of the SDK foundation workspace.
+Product applications, bridges, web interfaces, dispatch logic, save-game integration, and other end-user components are intentionally outside this SDK workspace.
 
 ## Development environment
 
@@ -332,7 +332,7 @@ The workspace uses strict Clippy configuration, in particular rejecting casts th
 
 ## Continuous integration
 
-`.github/workflows/rust.yml` follows the organization of AsterDrive's Rust workflow while retaining read-only repository permissions, cancellation of superseded commits on the same branch, path filtering, fixed timeouts, and independent Rust caches. ETS2 Dispatch divides its own foundation boundaries into seven parallel gates:
+`.github/workflows/rust.yml` retains read-only repository permissions, cancellation of superseded commits on the same branch, path filtering, fixed timeouts, and independent Rust caches. The workspace divides its foundation boundaries into seven parallel gates:
 
 | Job | Verification |
 | --- | --- |
@@ -340,9 +340,9 @@ The workspace uses strict Clippy configuration, in particular rejecting casts th
 | `Workspace tests` | all workspace unit tests and doctests |
 | `Miri (scs-sdk)` | typed values, unions, padding, scope, and catalogs under Miri |
 | `Miri (scs-sdk-plugin)` | runtime strict provenance, context lifetimes, and stale-generation behavior |
-| `Windows x86-64 plugin` | MinGW release DLLs for both the product and isolated macro fixture, PE32+/x86-64 format, and both dynamic SCS exports |
-| `Linux x86-64 plugin (glibc 2.17)` | Zig release shared objects for both the product and isolated macro fixture, ELF/x86-64 format, and both dynamic SCS exports |
-| `macOS x86-64 plugin` | release dynamic libraries for both the product and isolated macro fixture, Mach-O/x86-64 format, and both external SCS exports |
+| `Windows x86-64 plugin` | MinGW release DLLs for both the example and isolated macro fixture, PE32+/x86-64 format, and both dynamic SCS exports |
+| `Linux x86-64 plugin (glibc 2.17)` | Zig release shared objects for both the example and isolated macro fixture, ELF/x86-64 format, and both dynamic SCS exports |
+| `macOS x86-64 plugin` | release dynamic libraries for both the example and isolated macro fixture, Mach-O/x86-64 format, and both external SCS exports |
 
 CI pins:
 
@@ -367,7 +367,7 @@ scripts/build-windows-plugin.sh
 Artifact:
 
 ```text
-target/x86_64-pc-windows-gnu/release/ets2_dispatch_telemetry_rust.dll
+target/x86_64-pc-windows-gnu/release/scs_sdk_telemetry_example.dll
 ```
 
 The script checks:
@@ -398,7 +398,7 @@ x86_64-unknown-linux-gnu.2.17
 Artifact:
 
 ```text
-target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so
+target/x86_64-unknown-linux-gnu/release/libscs_sdk_telemetry_example.so
 ```
 
 The script checks:
@@ -425,7 +425,7 @@ The current macOS ETS2 executable is x86-64, including on Apple Silicon where it
 Artifact:
 
 ```text
-target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib
+target/x86_64-apple-darwin/release/libscs_sdk_telemetry_example.dylib
 ```
 
 The script checks:
@@ -470,26 +470,26 @@ Build the macOS x86-64 fixture and verify its real Mach-O exports:
 scripts/build-macos-plugin-macro-fixture.sh
 ```
 
-Fixture artifacts are written under `target/plugin-macro-fixtures/`. They exist only to verify the proc-macro consumer contract and are not distributed as ETS2 Dispatch product plugins. Install the platform-specific product artifact listed earlier in this section into the game.
+Fixture artifacts are written under `target/plugin-macro-fixtures/`. They exist only to verify the proc-macro consumer contract and are not distributed as example plugins. Install the platform-specific example artifact listed earlier in this section into the game.
 
 ## Installing into ETS2
 
 Place the Windows DLL at:
 
 ```text
-bin/win_x64/plugins/ets2_dispatch_telemetry_rust.dll
+bin/win_x64/plugins/scs_sdk_telemetry_example.dll
 ```
 
 Place the Linux shared object at:
 
 ```text
-bin/linux_x64/plugins/libets2_dispatch_telemetry_rust.so
+bin/linux_x64/plugins/libscs_sdk_telemetry_example.so
 ```
 
 Place the macOS dynamic library at:
 
 ```text
-<ETS2 installation>/Euro Truck Simulator 2.app/Contents/MacOS/plugins/libets2_dispatch_telemetry_rust.dylib
+<ETS2 installation>/Euro Truck Simulator 2.app/Contents/MacOS/plugins/libscs_sdk_telemetry_example.dylib
 ```
 
 For the default Steam library under the current user, `<ETS2 installation>` is normally `~/Library/Application Support/Steam/steamapps/common/Euro Truck Simulator 2`. SCS discovers plugins from the `plugins` directory beside the game executable; this is separate from the user-data directory containing profiles and logs.
@@ -519,21 +519,9 @@ The macOS game log is normally located at:
 The current probe uses this log prefix:
 
 ```text
-[ets2-dispatch-rust]
+[scs-sdk-example]
 ```
 
-## Later phases
-
-After the SDK foundation is complete and stable, the product layer will proceed in this order:
-
-1. local bridge and IPC;
-2. telemetry protocol;
-3. browser/PWA dashboard;
-4. dispatch, trip history, and a local database;
-5. save-game job synchronization;
-6. independent routing and map capabilities.
-
-These directories currently reserve architectural boundaries only. Network, database, and product state should not flow backward into telemetry callbacks inside the game process.
 
 ## License
 

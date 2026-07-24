@@ -6,7 +6,7 @@ on:
     paths:
       - '.cargo/**'
       - '.github/workflows/rust.yml'
-      - 'apps/plugin-rust/**'
+      - 'examples/telemetry-plugin/**'
       - 'crates/scs-sdk-sys/**'
       - 'crates/scs-sdk/**'
       - 'crates/scs-sdk-plugin/**'
@@ -21,7 +21,7 @@ on:
     paths:
       - '.cargo/**'
       - '.github/workflows/rust.yml'
-      - 'apps/plugin-rust/**'
+      - 'examples/telemetry-plugin/**'
       - 'crates/scs-sdk-sys/**'
       - 'crates/scs-sdk/**'
       - 'crates/scs-sdk-plugin/**'
@@ -180,10 +180,10 @@ jobs:
       - name: Upload Windows plugin
         uses: actions/upload-artifact@v7
         with:
-          name: ets2-dispatch-windows-x86-64-${{ github.sha }}
+          name: scs-sdk-telemetry-example-windows-x86-64-${{ github.sha }}
           if-no-files-found: error
           retention-days: 7
-          path: target/x86_64-pc-windows-gnu/release/ets2_dispatch_telemetry_rust.dll
+          path: target/x86_64-pc-windows-gnu/release/scs_sdk_telemetry_example.dll
 
   linux-plugin:
     name: Linux x86-64 plugin (glibc 2.17)
@@ -223,10 +223,10 @@ jobs:
       - name: Upload Linux plugin
         uses: actions/upload-artifact@v7
         with:
-          name: ets2-dispatch-linux-x86-64-${{ github.sha }}
+          name: scs-sdk-telemetry-example-linux-x86-64-${{ github.sha }}
           if-no-files-found: error
           retention-days: 7
-          path: target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so
+          path: target/x86_64-unknown-linux-gnu/release/libscs_sdk_telemetry_example.so
 
   macos-plugin:
     name: macOS x86-64 plugin
@@ -259,7 +259,7 @@ jobs:
       - name: Upload macOS plugin
         uses: actions/upload-artifact@v7
         with:
-          name: ets2-dispatch-macos-x86-64-${{ github.sha }}
+          name: scs-sdk-telemetry-example-macos-x86-64-${{ github.sha }}
           if-no-files-found: error
           retention-days: 7
-          path: target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib
+          path: target/x86_64-apple-darwin/release/libscs_sdk_telemetry_example.dylib

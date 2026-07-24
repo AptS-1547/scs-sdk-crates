@@ -1,13 +1,13 @@
 [package]
-name = "ets2-dispatch-telemetry-rust"
+name = "scs-sdk-telemetry-example"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Rust parity telemetry plugin for ETS2 Dispatch"
+description = "Safe Rust telemetry plugin example for the SCS SDK crates"
 
 [lib]
-name = "ets2_dispatch_telemetry_rust"
+name = "scs_sdk_telemetry_example"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 

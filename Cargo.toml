@@ -1,10 +1,10 @@
 [workspace]
 members = [
-  "apps/plugin-rust",
   "crates/scs-sdk",
   "crates/scs-sdk-plugin",
   "crates/scs-sdk-plugin-macros",
   "crates/scs-sdk-sys",
+  "examples/telemetry-plugin",
 ]
 resolver = "3"
 

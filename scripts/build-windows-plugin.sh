@@ -4,11 +4,11 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="x86_64-pc-windows-gnu"
-plugin="$repo_root/target/$target/release/ets2_dispatch_telemetry_rust.dll"
+plugin="$repo_root/target/$target/release/scs_sdk_telemetry_example.dll"
 
 cargo build \
   --manifest-path "$repo_root/Cargo.toml" \
-  --package ets2-dispatch-telemetry-rust \
+  --package scs-sdk-telemetry-example \
   --target "$target" \
   --locked \
   --release

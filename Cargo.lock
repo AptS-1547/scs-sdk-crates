@@ -3,13 +3,6 @@
 version = 4
 
 [[package]]
-name = "ets2-dispatch-telemetry-rust"
-version = "0.1.0"
-dependencies = [
- "scs-sdk-plugin",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -55,6 +48,13 @@ dependencies = [
 [[package]]
 name = "scs-sdk-sys"
 version = "0.1.0"
+
+[[package]]
+name = "scs-sdk-telemetry-example"
+version = "0.1.0"
+dependencies = [
+ "scs-sdk-plugin",
+]
 
 [[package]]
 name = "syn"

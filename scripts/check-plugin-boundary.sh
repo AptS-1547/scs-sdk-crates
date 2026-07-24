@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-plugin_source="${1:-$repo_root/apps/plugin-rust}"
+plugin_source="${1:-$repo_root/examples/telemetry-plugin}"
 
 if [[ ! -d "$plugin_source" || ! -f "$plugin_source/Cargo.toml" ]]; then
   printf 'Plugin crate does not exist or has no Cargo.toml: %s\n' "$plugin_source" >&2

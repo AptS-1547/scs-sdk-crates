@@ -1,8 +1,8 @@
-# ETS2 Dispatch
+# SCS SDK Rust Crates
 
 [English](README.md) | **简体中文**
 
-ETS2 Dispatch 的长期目标是为 Euro Truck Simulator 2 提供外置网页仪表、导航数据和调度能力。仓库当前只推进 **SCS Telemetry SDK 基座**：先把官方 SDK 1.14 的 ABI、类型化 wrapper、插件生命周期和跨平台构建做完整，再讨论 bridge、网页或调度产品。
+SCS Software SDK 的类型化 Rust bindings 与 safe plugin framework。当前 workspace 完整覆盖 Telemetry SDK 1.14 的公开接口，并保留一个真实 ETS2 plugin example，用于验证应用边界与跨平台 loader 产物。具体产品插件放在独立仓库中。
 
 当前基座使用纯 Rust 实现，不需要 C++ shim、CMake 或 bindgen。官方 SDK 原始分发仍保留在 `third-party/scs_sdk_1_14/`，它是 ABI 与常量的权威来源。
 
@@ -49,7 +49,7 @@ ETS2 Dispatch 的长期目标是为 Euro Truck Simulator 2 提供外置网页仪
 ## 四层结构
 
 ```text
-apps/plugin-rust
+examples/telemetry-plugin
         |
         | safe TelemetryPlugin API
         v
@@ -129,9 +129,9 @@ SDK 规定调回游戏的 API 只能在主线程，并且只能发生在游戏�
 runtime 会在产品初始化前记录产品与兼容性身份，并在注册提交后输出实际 event/channel 数量。`game_display_name` 是 SCS 提供的完整展示字符串，API 与 schema 版本则保持为独立的强类型字段：
 
 ```text
-[scs-sdk-plugin] starting plugin name="ETS2 Dispatch Telemetry" version="0.1.0" framework_version="0.1.0"
+[scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" version="0.1.0" framework_version="0.1.0"
 [scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
-[scs-sdk-plugin] initialized plugin name="ETS2 Dispatch Telemetry" version="0.1.0" events=6 channels=8
+[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.0" events=6 channels=8
 ```
 
 ### `scs-sdk-plugin-macros`
@@ -139,7 +139,7 @@ runtime 会在产品初始化前记录产品与兼容性身份，并在注册提
 `crates/scs-sdk-plugin-macros/` 提供：
 
 ```rust
-scs_sdk_plugin::export_plugin!(DispatchPlugin::default());
+scs_sdk_plugin::export_plugin!(TelemetryExample::default());
 ```
 
 宏生成 SCS loader 查找的：
@@ -205,9 +205,9 @@ impl TelemetryPlugin for Plugin {
 
 显式意图不等于把资源管理推给产品。插件成功返回后，runtime 才提交注册；任一 SDK 调用失败时，之前已注册项目会按相反顺序注销。正常 shutdown 使用相同的逆序规则。
 
-## 应用插件边界
+## 示例插件边界
 
-`apps/plugin-rust/` 是当前实机探针，也是 framework 的边界样例。它只依赖 `scs-sdk-plugin`，显式订阅当前需要的 6 类 event 和 8 个 channel，然后使用 typed callback 更新 snapshot、记录任务配置和 gameplay event。
+`examples/telemetry-plugin/` 是真实实机探针，也是 framework 的应用边界示例。它只依赖 `scs-sdk-plugin`，显式订阅 6 类 event 和 8 个 channel，然后使用 typed callback 更新 snapshot、记录任务配置和 gameplay event。
 
 该目录的源码目标是：
 
@@ -229,18 +229,18 @@ scripts/check-plugin-boundary.sh
 ## Workspace
 
 ```text
-apps/plugin-rust/               safe Rust 实机探针 cdylib
 crates/scs-sdk-sys/             SDK 1.14 raw x86-64 ABI
 crates/scs-sdk/                 no_std typed wrapper 与完整 catalog
 crates/scs-sdk-plugin/          safe plugin 生命周期框架
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
   tests/fixtures/export-plugin/ 独立宏 compile-pass/fail cdylib workspace
+examples/telemetry-plugin/      safe Rust 实机示例 cdylib
 scripts/                        Windows/Linux/macOS 构建与产物验证
 third-party/scs_sdk_1_14/       官方 SDK 原始分发与许可证
 tmp/                            本地调查、日志结论和设计笔记
 ```
 
-`apps/bridge/`、`apps/web/`、`crates/dispatcher/`、`crates/protocol/`、`crates/savegame/`、`crates/telemetry/`、`assets/` 和 `fixtures/` 是后续产品阶段的保留目录，当前不属于 SDK 基座 workspace。
+具体产品应用、bridge、网页、调度逻辑、存档集成与其他最终用户组件均刻意放在该 SDK workspace 之外。
 
 ## 开发环境
 
@@ -332,7 +332,7 @@ workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号�
 
 ## 持续集成
 
-`.github/workflows/rust.yml` 参考 AsterDrive 的 Rust workflow 组织方式，保留只读仓库权限、相同分支新提交的并发取消、路径过滤、固定超时和独立 Rust cache。ETS2 Dispatch 根据自身基座边界拆成七个并行 gate：
+`.github/workflows/rust.yml` 保留只读仓库权限、相同分支新提交的并发取消、路径过滤、固定超时和独立 Rust cache。workspace 根据自身基座边界拆成七个并行 gate：
 
 | Job | 验证内容 |
 | --- | --- |
@@ -340,9 +340,9 @@ workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号�
 | `Workspace tests` | 全 workspace unit tests 和 doctests |
 | `Miri (scs-sdk)` | typed value、union、padding、scope 与 catalog 的 Miri 验证 |
 | `Miri (scs-sdk-plugin)` | runtime strict provenance、context 生命周期和 stale generation 验证 |
-| `Windows x86-64 plugin` | 产品与独立宏 fixture 的 MinGW release DLL、PE32+/x86-64 和两个 SCS dynamic exports |
-| `Linux x86-64 plugin (glibc 2.17)` | 产品与独立宏 fixture 的 Zig release shared object、ELF/x86-64 和两个 SCS dynamic exports |
-| `macOS x86-64 plugin` | 产品与独立宏 fixture 的 release dynamic library、Mach-O/x86-64 和两个 SCS external exports |
+| `Windows x86-64 plugin` | 示例与独立宏 fixture 的 MinGW release DLL、PE32+/x86-64 和两个 SCS dynamic exports |
+| `Linux x86-64 plugin (glibc 2.17)` | 示例与独立宏 fixture 的 Zig release shared object、ELF/x86-64 和两个 SCS dynamic exports |
+| `macOS x86-64 plugin` | 示例与独立宏 fixture 的 release dynamic library、Mach-O/x86-64 和两个 SCS external exports |
 
 CI 固定使用：
 
@@ -367,7 +367,7 @@ scripts/build-windows-plugin.sh
 产物：
 
 ```text
-target/x86_64-pc-windows-gnu/release/ets2_dispatch_telemetry_rust.dll
+target/x86_64-pc-windows-gnu/release/scs_sdk_telemetry_example.dll
 ```
 
 脚本会检查：
@@ -398,7 +398,7 @@ x86_64-unknown-linux-gnu.2.17
 产物：
 
 ```text
-target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so
+target/x86_64-unknown-linux-gnu/release/libscs_sdk_telemetry_example.so
 ```
 
 脚本会检查：
@@ -425,7 +425,7 @@ scripts/build-macos-plugin.sh
 产物：
 
 ```text
-target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib
+target/x86_64-apple-darwin/release/libscs_sdk_telemetry_example.dylib
 ```
 
 脚本会检查：
@@ -470,26 +470,26 @@ scripts/build-linux-plugin-macro-fixture.sh
 scripts/build-macos-plugin-macro-fixture.sh
 ```
 
-fixture 产物位于 `target/plugin-macro-fixtures/`，仅用于验证 proc-macro 的 consumer contract，不作为 ETS2 Dispatch 产品插件分发。游戏安装使用本节前面列出的对应平台产品产物。
+fixture 产物位于 `target/plugin-macro-fixtures/`，仅用于验证 proc-macro 的 consumer contract，不作为示例插件分发。游戏安装使用本节前面列出的对应平台示例产物。
 
 ## 安装到 ETS2
 
 Windows DLL 放入：
 
 ```text
-bin/win_x64/plugins/ets2_dispatch_telemetry_rust.dll
+bin/win_x64/plugins/scs_sdk_telemetry_example.dll
 ```
 
 Linux shared object 放入：
 
 ```text
-bin/linux_x64/plugins/libets2_dispatch_telemetry_rust.so
+bin/linux_x64/plugins/libscs_sdk_telemetry_example.so
 ```
 
 macOS dynamic library 放入：
 
 ```text
-<ETS2 安装目录>/Euro Truck Simulator 2.app/Contents/MacOS/plugins/libets2_dispatch_telemetry_rust.dylib
+<ETS2 安装目录>/Euro Truck Simulator 2.app/Contents/MacOS/plugins/libscs_sdk_telemetry_example.dylib
 ```
 
 Steam library 位于当前用户默认位置时，`<ETS2 安装目录>` 通常是 `~/Library/Application Support/Steam/steamapps/common/Euro Truck Simulator 2`。SCS 从游戏可执行文件旁的 `plugins` 目录发现插件；这里与保存 profile 和日志的用户数据目录不是同一个位置。
@@ -519,21 +519,9 @@ macOS 游戏日志通常位于：
 当前探针日志前缀：
 
 ```text
-[ets2-dispatch-rust]
+[scs-sdk-example]
 ```
 
-## 后续阶段
-
-SDK 基座完成并稳定后，产品层再依次处理：
-
-1. 本地 bridge 与 IPC；
-2. telemetry protocol；
-3. 浏览器/PWA 仪表盘；
-4. 调度、行程记录与本地数据库；
-5. 存档任务同步；
-6. 独立路线与地图能力。
-
-这些目录目前只是保留边界，不应反向把网络、数据库或产品状态塞回游戏进程内的 telemetry callback。
 
 ## 许可证
 

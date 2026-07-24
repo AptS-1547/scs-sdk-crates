@@ -18,7 +18,7 @@ cargo fmt \
   --check
 
 # Both sources model application crates and therefore share the same source
-# boundary as apps/plugin-rust. The failing fixture is allowed to omit the
+# boundary as examples/telemetry-plugin. The failing fixture may omit the
 # lifecycle trait implementation, but it still has no reason to mention raw ABI
 # syntax, C strings, pointers, or scs-sdk-sys.
 "$repo_root/scripts/check-plugin-boundary.sh" "$fixture_root/pass"

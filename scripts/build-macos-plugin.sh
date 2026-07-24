@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="x86_64-apple-darwin"
-plugin="$repo_root/target/$target/release/libets2_dispatch_telemetry_rust.dylib"
+plugin="$repo_root/target/$target/release/libscs_sdk_telemetry_example.dylib"
 
 # Build the architecture used by the macOS game executable, not the build
 # machine's native architecture. This distinction matters on Apple Silicon:
@@ -12,7 +12,7 @@ plugin="$repo_root/target/$target/release/libets2_dispatch_telemetry_rust.dylib"
 # x86-64 and therefore requires an x86-64 plugin in the same process.
 cargo build \
   --manifest-path "$repo_root/Cargo.toml" \
-  --package ets2-dispatch-telemetry-rust \
+  --package scs-sdk-telemetry-example \
   --target "$target" \
   --locked \
   --release

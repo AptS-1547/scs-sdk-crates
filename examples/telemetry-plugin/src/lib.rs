@@ -1,4 +1,4 @@
-//! ETS2 Dispatch telemetry probe implemented on the safe plugin framework.
+//! End-to-end ETS2 telemetry example built on the safe plugin framework.
 //!
 //! This crate intentionally contains only product-owned state and behavior:
 //! which channels are interesting, how a snapshot is accumulated, and what is
@@ -60,14 +60,14 @@ struct Snapshot {
 /// value on initialization and shutdown also prevents one game session from
 /// leaking data into a later reinitialization of the same loaded library.
 #[derive(Debug)]
-struct DispatchPlugin {
+struct TelemetryExample {
     snapshot: Snapshot,
     current_render_time: u64,
     last_probe_log_time: Option<u64>,
     paused: bool,
 }
 
-impl Default for DispatchPlugin {
+impl Default for TelemetryExample {
     fn default() -> Self {
         Self {
             snapshot: Snapshot::default(),
@@ -79,7 +79,7 @@ impl Default for DispatchPlugin {
     }
 }
 
-impl DispatchPlugin {
+impl TelemetryExample {
     /// Applies one type-checked channel callback to the accumulated snapshot.
     ///
     /// `ChannelUpdate::value` verifies both the registered descriptor and the
@@ -142,7 +142,7 @@ impl DispatchPlugin {
 
         context.message(format_args!(
             concat!(
-                "[ets2-dispatch-rust] probe speed={:.1}km/h rpm={:.0} gear={} ",
+                "[scs-sdk-example] probe speed={:.1}km/h rpm={:.0} gear={} ",
                 "position=({:.3},{:.3},{:.3}) heading={:.4} ",
                 "navigation_distance={:.2}km navigation_time={:.0}s ",
                 "speed_limit={} cargo_damage={:.3}"
@@ -170,7 +170,7 @@ impl DispatchPlugin {
             return;
         }
         if !configuration_event.has_attributes() {
-            context.message(format_args!("[ets2-dispatch-rust] no active job"));
+            context.message(format_args!("[scs-sdk-example] no active job"));
             return;
         }
 
@@ -229,7 +229,7 @@ impl DispatchPlugin {
 
         context.message(format_args!(
             concat!(
-                "[ets2-dispatch-rust] job cargo={} cargo_id={} mass={:.0}kg ",
+                "[scs-sdk-example] job cargo={} cargo_id={} mass={:.0}kg ",
                 "source={}({})/{}({}) destination={}({})/{}({}) market={} ",
                 "income={} planned_distance={}km delivery_time={} ",
                 "cargo_loaded={} special_job={}"
@@ -279,7 +279,7 @@ impl DispatchPlugin {
 
             context.message(format_args!(
                 concat!(
-                    "[ets2-dispatch-rust] job delivered revenue={} xp={} ",
+                    "[scs-sdk-example] job delivered revenue={} xp={} ",
                     "cargo_damage={:.3} distance={:.1}km delivery_time={}min ",
                     "auto_park={} auto_load={}"
                 ),
@@ -296,15 +296,15 @@ impl DispatchPlugin {
                 .get(gameplay::attributes::CANCEL_PENALTY)
                 .unwrap_or_default();
             context.message(format_args!(
-                "[ets2-dispatch-rust] job cancelled penalty={penalty}"
+                "[scs-sdk-example] job cancelled penalty={penalty}"
             ));
         }
     }
 }
 
-impl TelemetryPlugin for DispatchPlugin {
+impl TelemetryPlugin for TelemetryExample {
     fn metadata(&self) -> PluginMetadata {
-        PluginMetadata::new("ETS2 Dispatch Telemetry", env!("CARGO_PKG_VERSION"))
+        PluginMetadata::new("SCS SDK Telemetry Example", env!("CARGO_PKG_VERSION"))
     }
 
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
@@ -317,7 +317,7 @@ impl TelemetryPlugin for DispatchPlugin {
             return Err(PluginError::new(
                 scs_sdk_plugin::sdk::SdkError::Unsupported,
                 format!(
-                    "ets2-dispatch was loaded by unsupported game {:?}",
+                    "the ETS2 telemetry example was loaded by unsupported game {:?}",
                     context.game().id()
                 ),
             ));
@@ -347,9 +347,7 @@ impl TelemetryPlugin for DispatchPlugin {
         context.subscribe(channels::truck::NAVIGATION_SPEED_LIMIT)?;
         context.subscribe(channels::job::CARGO_DAMAGE)?;
 
-        context.message(format_args!(
-            "[ets2-dispatch-rust] product state initialized"
-        ));
+        context.message(format_args!("[scs-sdk-example] example state initialized"));
         Ok(())
     }
 
@@ -370,11 +368,11 @@ impl TelemetryPlugin for DispatchPlugin {
             TelemetryEvent::FrameEnd => self.log_probe(context),
             TelemetryEvent::Paused => {
                 self.paused = true;
-                context.message(format_args!("[ets2-dispatch-rust] telemetry paused"));
+                context.message(format_args!("[scs-sdk-example] telemetry paused"));
             }
             TelemetryEvent::Started => {
                 self.paused = false;
-                context.message(format_args!("[ets2-dispatch-rust] telemetry started"));
+                context.message(format_args!("[scs-sdk-example] telemetry started"));
             }
             TelemetryEvent::Configuration(configuration_event) => {
                 Self::log_job_configuration(context, configuration_event);
@@ -386,9 +384,9 @@ impl TelemetryPlugin for DispatchPlugin {
     }
 
     fn shutdown(&mut self, context: &mut PluginContext<'_>) {
-        context.message(format_args!("[ets2-dispatch-rust] product state shutdown"));
+        context.message(format_args!("[scs-sdk-example] example state shutdown"));
         *self = Self::default();
     }
 }
 
-export_plugin!(DispatchPlugin::default());
+export_plugin!(TelemetryExample::default());

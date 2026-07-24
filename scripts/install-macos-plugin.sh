@@ -3,13 +3,14 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-default_plugin="$repo_root/target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib"
+default_plugin="$repo_root/target/x86_64-apple-darwin/release/libscs_sdk_telemetry_example.dylib"
 steam_common="$HOME/Library/Application Support/Steam/steamapps/common"
 default_game_macos="$steam_common/Euro Truck Simulator 2/Euro Truck Simulator 2.app/Contents/MacOS"
 plugin_source="${1:-$default_plugin}"
 game_macos="${ETS2_MACOS_DIR:-$default_game_macos}"
 plugin_dir="$game_macos/plugins"
-plugin_destination="$plugin_dir/libets2_dispatch_telemetry_rust.dylib"
+plugin_destination="$plugin_dir/libscs_sdk_telemetry_example.dylib"
+legacy_plugin="$plugin_dir/libets2_dispatch_telemetry_rust.dylib"
 
 if [[ ! -f "$plugin_source" ]]; then
   printf 'Plugin does not exist: %s\n' "$plugin_source" >&2
@@ -27,12 +28,12 @@ fi
 # user may want to checksum later. Downloaded archives can carry quarantine;
 # remove it before signing because changing extended attributes after copying
 # can otherwise trigger a first-load Gatekeeper assessment.
-staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/ets2-dispatch-install.XXXXXX")"
+staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/scs-sdk-example-install.XXXXXX")"
 cleanup() {
   rm -rf "$staging_dir"
 }
 trap cleanup EXIT
-staged_plugin="$staging_dir/libets2_dispatch_telemetry_rust.dylib"
+staged_plugin="$staging_dir/libscs_sdk_telemetry_example.dylib"
 cp "$plugin_source" "$staged_plugin"
 xattr -d com.apple.quarantine "$staged_plugin" 2>/dev/null || true
 codesign --force --sign - "$staged_plugin"
@@ -52,4 +53,10 @@ chmod 755 "$plugin_destination"
 
 xattr -d com.apple.quarantine "$plugin_destination" 2>/dev/null || true
 "$repo_root/scripts/verify-macos-plugin.sh" "$plugin_destination"
+
+# The example previously used an ETS2 Dispatch product filename. Leaving that
+# artifact beside the renamed library would make SCS load two independent
+# plugin instances and duplicate every registration and log line. Remove only
+# this exact legacy filename after the new artifact has passed verification.
+rm -f "$legacy_plugin"
 printf 'Installed macOS telemetry plugin: %s\n' "$plugin_destination"
