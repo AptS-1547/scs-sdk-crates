@@ -65,6 +65,10 @@ use syn::{Expr, parse_macro_input};
 /// struct MyPlugin;
 ///
 /// impl scs_sdk_plugin::TelemetryPlugin for MyPlugin {
+///     fn metadata(&self) -> scs_sdk_plugin::PluginMetadata {
+///         scs_sdk_plugin::PluginMetadata::new("My Plugin", env!("CARGO_PKG_VERSION"))
+///     }
+///
 ///     fn initialize(
 ///         &mut self,
 ///         _context: &mut scs_sdk_plugin::PluginContext<'_>,

@@ -1,7 +1,7 @@
 use core::ffi::{CStr, c_void};
 use core::marker::PhantomData;
 
-use crate::{Event, SdkError, SdkResult, sys};
+use crate::{Event, GameSchemaVersion, SdkError, SdkResult, TelemetryApiVersion, sys};
 
 /// An inert handle to the game's logger.
 ///
@@ -102,16 +102,29 @@ impl<'a> TelemetryApi<'a> {
     ///
     /// # Safety
     ///
-    /// `params` must point to a live v1.00/v1.01 telemetry initialization
-    /// structure supplied by the game. The returned view may only be used
-    /// synchronously during the direct initialization call from SCS, on the
-    /// game's main thread. The pointed-to function table and strings must remain
-    /// valid for that use.
+    /// For a supported `version`, `params` must point to the live matching
+    /// telemetry initialization structure supplied by the game. An unsupported
+    /// version is rejected before `params` is inspected. The returned view may
+    /// only be used synchronously during the direct initialization call from
+    /// SCS, on the game's main thread. The pointed-to function table and strings
+    /// must remain valid for that use.
     ///
     /// # Errors
     ///
-    /// Returns [`SdkError::InvalidParameter`] when `params` is null.
-    pub unsafe fn from_raw(params: *const sys::ScsTelemetryInitParams) -> SdkResult<Self> {
+    /// Returns [`SdkError::Unsupported`] before reading `params` when `version`
+    /// has no audited adapter. Returns [`SdkError::InvalidParameter`] when the
+    /// version is supported but `params` is null.
+    pub unsafe fn from_raw(
+        version: TelemetryApiVersion,
+        params: *const sys::ScsTelemetryInitParams,
+    ) -> SdkResult<Self> {
+        // Both versions use the same concrete initialization structure in SDK
+        // 1.14. Keep the whitelist explicit: a future version must add and
+        // audit its own adapter before this code reads the foreign structure.
+        match version {
+            TelemetryApiVersion::V1_00 | TelemetryApiVersion::V1_01 => {}
+            _ => return Err(SdkError::Unsupported),
+        }
         let raw = unsafe { params.cast::<sys::ScsTelemetryInitParamsV101>().as_ref() }
             .ok_or(SdkError::InvalidParameter)?;
         Ok(Self {
@@ -141,8 +154,8 @@ impl<'a> TelemetryApi<'a> {
     }
 
     #[must_use]
-    pub const fn game_version(&self) -> sys::ScsU32 {
-        self.raw.common.game_version
+    pub const fn game_schema_version(&self) -> GameSchemaVersion {
+        GameSchemaVersion::from_raw(self.raw.common.game_version)
     }
 
     /// Returns an inert session handle for later callback entry points.
@@ -335,9 +348,11 @@ mod tests {
         EVENT_REGISTRATIONS.store(0, Ordering::Relaxed);
         let parameters = parameters();
         let pointer = (&raw const parameters).cast::<sys::ScsTelemetryInitParams>();
-        let api = unsafe { TelemetryApi::from_raw(pointer) }.expect("valid function table");
+        let api = unsafe { TelemetryApi::from_raw(TelemetryApiVersion::V1_01, pointer) }
+            .expect("valid function table");
 
         assert_eq!(api.game_id(), c"eut2");
+        assert_eq!(api.game_schema_version(), GameSchemaVersion::new(1, 60));
         api.with_call(|call| {
             call.logger().message(c"initializing");
             unsafe {
@@ -353,5 +368,17 @@ mod tests {
 
         assert_eq!(LOG_CALLS.load(Ordering::Relaxed), 2);
         assert_eq!(EVENT_REGISTRATIONS.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn unaudited_api_version_is_rejected_before_reading_parameters() {
+        let result = unsafe {
+            TelemetryApi::from_raw(
+                TelemetryApiVersion::new(1, 2),
+                core::ptr::null::<sys::ScsTelemetryInitParams>(),
+            )
+        };
+
+        assert!(matches!(result, Err(SdkError::Unsupported)));
     }
 }

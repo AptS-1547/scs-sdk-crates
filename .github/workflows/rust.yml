@@ -227,3 +227,39 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so
+
+  macos-plugin:
+    name: macOS x86-64 plugin
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The macOS game executable is still x86-64. Selecting the target
+      # explicitly also keeps this job correct if GitHub changes the native
+      # architecture behind the macos-latest runner label.
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Cache macOS build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-x86-64-v1
+
+      - name: Build and verify macOS plugin
+        run: scripts/build-macos-plugin.sh
+
+      - name: Build and verify macOS macro fixture
+        run: scripts/build-macos-plugin-macro-fixture.sh
+
+      - name: Upload macOS plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: ets2-dispatch-macos-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib

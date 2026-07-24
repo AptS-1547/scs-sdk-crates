@@ -14,7 +14,7 @@ The current design maintains the following boundaries:
 2. **Product intent must be explicit**: the framework does not infer event subscriptions from implemented callbacks, nor does it automatically subscribe to the entire channel catalog.
 3. **Application plugins use safe Rust only**: raw pointers, C strings, FFI callbacks, exported symbols, and `unsafe` are contained within the framework and lower layers.
 4. **The framework owns correctness transactions**: reverse rollback after successful registrations, shutdown unregistration, panic containment, stale callback isolation, and context retention are lifecycle mechanisms that each product plugin should not have to reimplement.
-5. **Cross-platform artifacts are verifiable**: both the Windows DLL and Linux shared object are checked for their architecture and required SCS exports after building, rather than being trusted by filename extension alone.
+5. **Cross-platform artifacts are verifiable**: the Windows DLL, Linux shared object, and macOS dynamic library are checked for their architecture and required SCS exports after building, rather than being trusted by filename extension alone.
 
 ## SDK 1.14 coverage
 
@@ -111,6 +111,7 @@ The SDK requires calls back into the game to occur on the main thread and only w
 `crates/scs-sdk-plugin/` combines the lower-level capabilities into a safe application framework:
 
 - the `TelemetryPlugin` lifecycle;
+- explicit product identity through required `PluginMetadata`;
 - explicit event and channel subscriptions through `PluginContext`;
 - owned `GameInfo` and typed game detection through `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}`;
 - descriptor, SDK index, trailer index, and typed value decoding through `ChannelUpdate`;
@@ -124,6 +125,14 @@ The SDK requires calls back into the game to occur on the main thread and only w
 - retention of foreign contexts when unregistration fails.
 
 Registration contexts use `Arc<Registration>` to hold stable pointees and `AtomicBool` to represent whether the SDK side remains registered. The active and retired sets move only `Arc` handles, never the allocation, and do not invalidate foreign-pointer provenance by recreating an exclusive borrow. Each session also has a distinct generation, so even a delayed callback from an old session cannot enter a new plugin instance. This model has been verified under Miri strict provenance.
+
+The runtime emits product and compatibility identity before product initialization, then reports the committed subscription counts. `game_display_name` is the complete display string supplied by SCS, while the API and schema versions remain separate typed fields:
+
+```text
+[scs-sdk-plugin] starting plugin name="ETS2 Dispatch Telemetry" version="0.1.0" framework_version="0.1.0"
+[scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
+[scs-sdk-plugin] initialized plugin name="ETS2 Dispatch Telemetry" version="0.1.0" events=6 channels=8
+```
 
 ### `scs-sdk-plugin-macros`
 
@@ -147,7 +156,7 @@ The macro is not supported merely by an `ignore`d rustdoc example. `crates/scs-s
 - `pass` implements `TelemetryPlugin` and builds a real `cdylib` from `export_plugin!(Plugin::default())`;
 - `missing-trait` retains the same constructor expression but omits the trait implementation, and must fail with E0277 and a `TelemetryPlugin` trait-bound diagnostic.
 
-The passing fixture uses `#![forbid(unsafe_code)]` and undergoes the same source-boundary audit as the application plugin. Windows PE and Linux ELF builds additionally inspect the final dynamic export tables for `scs_telemetry_init` and `scs_telemetry_shutdown` after LTO and symbol stripping. This avoids confusing “the macro expanded” with “the game loader can actually see the symbols.” The proc-macro rustdoc example remains ignored because a reverse dev-dependency from the macro crate to the framework would create a Cargo dependency cycle; the isolated fixture is the long-term test boundary for that consumer contract.
+The passing fixture uses `#![forbid(unsafe_code)]` and undergoes the same source-boundary audit as the application plugin. Windows PE, Linux ELF, and macOS Mach-O builds additionally inspect the final external export tables for `scs_telemetry_init` and `scs_telemetry_shutdown` after LTO and symbol stripping. This avoids confusing “the macro expanded” with “the game loader can actually see the symbols.” The proc-macro rustdoc example remains ignored because a reverse dev-dependency from the macro crate to the framework would create a Cargo dependency cycle; the isolated fixture is the long-term test boundary for that consumer contract.
 
 ## Explicit subscriptions
 
@@ -156,12 +165,16 @@ A plugin must declare each intended subscription in `initialize`:
 ```rust
 use scs_sdk_plugin::sdk::{ChannelFlags, channels};
 use scs_sdk_plugin::{
-    PluginContext, PluginResult, TelemetryEventKind, TelemetryPlugin,
+    PluginContext, PluginMetadata, PluginResult, TelemetryEventKind, TelemetryPlugin,
 };
 
 struct Plugin;
 
 impl TelemetryPlugin for Plugin {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new("My Telemetry Plugin", env!("CARGO_PKG_VERSION"))
+    }
+
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
         context.subscribe_event(TelemetryEventKind::Started)?;
         context.subscribe_event(TelemetryEventKind::FrameEnd)?;
@@ -222,7 +235,7 @@ crates/scs-sdk/                 no_std typed wrapper and complete catalogs
 crates/scs-sdk-plugin/          safe plugin lifecycle framework
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
   tests/fixtures/export-plugin/ isolated macro compile-pass/fail cdylib workspace
-scripts/                        Windows/Linux builds and artifact verification
+scripts/                        Windows/Linux/macOS builds and artifact verification
 third-party/scs_sdk_1_14/       original official SDK distribution and license
 tmp/                            local investigations, log conclusions, and design notes
 ```
@@ -231,7 +244,7 @@ tmp/                            local investigations, log conclusions, and desig
 
 ## Development environment
 
-The repository pins Rust `1.85.0` in `rust-toolchain.toml` and declares the `rustfmt` and `clippy` components plus the Windows GNU and Linux GNU targets.
+The repository pins Rust `1.85.0` in `rust-toolchain.toml` and declares the `rustfmt` and `clippy` components plus the Windows GNU, Linux GNU, and macOS x86-64 targets.
 
 Base requirements:
 
@@ -304,7 +317,7 @@ Test coverage includes:
 - compile-fail doctests proving that `SdkCall` cannot escape and implements neither `Send` nor `Sync`;
 - independent compilation, strict Clippy, and safe-source auditing for the passing proc-macro consumer;
 - an exact E0277 trait-bound failure when the `TelemetryPlugin` implementation is missing;
-- both loader-visible SCS exports in the Windows PE and Linux ELF fixtures;
+- both loader-visible SCS exports in the Windows PE, Linux ELF, and macOS Mach-O fixtures;
 - no broken intra-doc links under workspace-wide rustdoc with `-Dwarnings`;
 - owned game metadata and the Rust string boundary;
 - scalar, indexed, and multi-trailer subscription naming;
@@ -319,7 +332,7 @@ The workspace uses strict Clippy configuration, in particular rejecting casts th
 
 ## Continuous integration
 
-`.github/workflows/rust.yml` follows the organization of AsterDrive's Rust workflow while retaining read-only repository permissions, cancellation of superseded commits on the same branch, path filtering, fixed timeouts, and independent Rust caches. ETS2 Dispatch divides its own foundation boundaries into six parallel gates:
+`.github/workflows/rust.yml` follows the organization of AsterDrive's Rust workflow while retaining read-only repository permissions, cancellation of superseded commits on the same branch, path filtering, fixed timeouts, and independent Rust caches. ETS2 Dispatch divides its own foundation boundaries into seven parallel gates:
 
 | Job | Verification |
 | --- | --- |
@@ -329,6 +342,7 @@ The workspace uses strict Clippy configuration, in particular rejecting casts th
 | `Miri (scs-sdk-plugin)` | runtime strict provenance, context lifetimes, and stale-generation behavior |
 | `Windows x86-64 plugin` | MinGW release DLLs for both the product and isolated macro fixture, PE32+/x86-64 format, and both dynamic SCS exports |
 | `Linux x86-64 plugin (glibc 2.17)` | Zig release shared objects for both the product and isolated macro fixture, ELF/x86-64 format, and both dynamic SCS exports |
+| `macOS x86-64 plugin` | release dynamic libraries for both the product and isolated macro fixture, Mach-O/x86-64 format, and both external SCS exports |
 
 CI pins:
 
@@ -340,7 +354,7 @@ cargo-zigbuild:     0.23.0
 Linux glibc floor:  2.17
 ```
 
-The Windows and Linux jobs upload plugin artifacts that have passed format and export checks and retain them for seven days. The workflow runs on pushes to `master`, pull requests targeting `master`, and manual dispatch. It runs automatically only when the SDK foundation, build scripts, toolchain, or workflow itself changes; standalone edits to the README or later web directories do not trigger the complete Miri and cross-platform build suite.
+The Windows, Linux, and macOS jobs upload plugin artifacts that have passed format and export checks and retain them for seven days. The workflow runs on pushes to `master`, pull requests targeting `master`, and manual dispatch. It runs automatically only when the SDK foundation, build scripts, toolchain, or workflow itself changes; standalone edits to the README or later web directories do not trigger the complete Miri and cross-platform build suite.
 
 ## Building and verification
 
@@ -400,6 +414,36 @@ An existing artifact can also be verified independently:
 scripts/verify-linux-plugin.sh PATH_TO_SHARED_OBJECT
 ```
 
+### macOS x86-64
+
+```bash
+scripts/build-macos-plugin.sh
+```
+
+The current macOS ETS2 executable is x86-64, including on Apple Silicon where it runs through Rosetta. The build therefore selects `x86_64-apple-darwin` explicitly instead of using the host architecture.
+
+Artifact:
+
+```text
+target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib
+```
+
+The script checks:
+
+- Mach-O 64-bit dynamically linked shared-library format;
+- x86-64 architecture;
+- a valid embedded code signature; local and CI builds use an ad-hoc identity;
+- the external `_scs_telemetry_init` symbol used by the Mach-O C ABI;
+- the external `_scs_telemetry_shutdown` symbol used by the Mach-O C ABI.
+
+The ad-hoc signature gives local builds a verifiable code directory but is not Developer ID signing or notarization. A public release pipeline should replace it with a project-owned Developer ID signature and notarized distribution archive.
+
+An existing artifact can also be verified independently:
+
+```bash
+scripts/verify-macos-plugin.sh PATH_TO_DYNAMIC_LIBRARY
+```
+
 ### Isolated proc-macro fixture
 
 Check only the passing/failing compilation contracts, formatting, Clippy, and safe source:
@@ -420,7 +464,13 @@ Build the Linux glibc 2.17 fixture and verify its real ELF exports:
 scripts/build-linux-plugin-macro-fixture.sh
 ```
 
-Fixture artifacts are written under `target/plugin-macro-fixtures/`. They exist only to verify the proc-macro consumer contract and are not distributed as ETS2 Dispatch product plugins. Install the `ets2_dispatch_telemetry_rust.dll` or `libets2_dispatch_telemetry_rust.so` listed earlier in this section into the game.
+Build the macOS x86-64 fixture and verify its real Mach-O exports:
+
+```bash
+scripts/build-macos-plugin-macro-fixture.sh
+```
+
+Fixture artifacts are written under `target/plugin-macro-fixtures/`. They exist only to verify the proc-macro consumer contract and are not distributed as ETS2 Dispatch product plugins. Install the platform-specific product artifact listed earlier in this section into the game.
 
 ## Installing into ETS2
 
@@ -436,12 +486,34 @@ Place the Linux shared object at:
 bin/linux_x64/plugins/libets2_dispatch_telemetry_rust.so
 ```
 
+Place the macOS dynamic library at:
+
+```text
+<ETS2 installation>/Euro Truck Simulator 2.app/Contents/MacOS/plugins/libets2_dispatch_telemetry_rust.dylib
+```
+
+For the default Steam library under the current user, `<ETS2 installation>` is normally `~/Library/Application Support/Steam/steamapps/common/Euro Truck Simulator 2`. SCS discovers plugins from the `plugins` directory beside the game executable; this is separate from the user-data directory containing profiles and logs.
+
+The repository installer removes a downloaded artifact's quarantine attribute, applies an ad-hoc signature to a private copy, verifies it, and then writes it to that directory:
+
+```bash
+scripts/install-macos-plugin.sh
+```
+
+Writing into another application bundle is controlled by macOS App Management. If installation reports `Operation not permitted`, allow the terminal under **System Settings -> Privacy & Security -> App Management**, restart the terminal, and run the installer again. The installer deliberately does not re-sign the ETS2 application: doing so would replace SCS Software's Developer ID and notarized application signature.
+
 Do not install multiple telemetry plugins that implement the same probe at the same time, because each will register its own channels and produce duplicate logs. ETS2 may display a confirmation prompt the first time it loads a third-party SDK plugin.
 
 The Windows game log is normally located at:
 
 ```text
 Documents/Euro Truck Simulator 2/game.log.txt
+```
+
+The macOS game log is normally located at:
+
+```text
+~/Library/Application Support/Euro Truck Simulator 2/game.log.txt
 ```
 
 The current probe uses this log prefix:

@@ -10,12 +10,16 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use scs_sdk::{Event, FrameStartRef, SdkCall, SdkError, TelemetryApi, TelemetrySession, ValueRef};
+use scs_sdk::{
+    Event, FrameStartRef, SdkCall, SdkError, TelemetryApi, TelemetryApiVersion, TelemetrySession,
+    ValueRef,
+};
 use scs_sdk_sys as sys;
 
 use crate::{
     ChannelUpdate, ConfigurationEvent, GameInfo, GameplayEvent, PluginContext, PluginError,
-    PluginResult, SubscriptionSpec, TelemetryEvent, TelemetryEventKind, TelemetryPlugin,
+    PluginMetadata, PluginResult, SubscriptionSpec, TelemetryEvent, TelemetryEventKind,
+    TelemetryPlugin,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +62,7 @@ struct EventRegistration {
 /// registration is attempted.
 struct PreparedPlugin {
     plugin: Box<dyn TelemetryPlugin>,
+    metadata: PluginMetadata,
     events: Vec<TelemetryEventKind>,
     channels: Vec<SubscriptionSpec>,
 }
@@ -68,6 +73,7 @@ struct RuntimeState {
     session: Option<TelemetrySession>,
     game: Option<GameInfo>,
     plugin: Option<Box<dyn TelemetryPlugin>>,
+    metadata: Option<PluginMetadata>,
     events: Vec<Arc<EventRegistration>>,
     channels: Vec<Arc<ChannelRegistration>>,
     retired_events: Vec<Arc<EventRegistration>>,
@@ -82,6 +88,7 @@ impl RuntimeState {
             session: None,
             game: None,
             plugin: None,
+            metadata: None,
             events: Vec::new(),
             channels: Vec::new(),
             retired_events: Vec::new(),
@@ -166,15 +173,19 @@ impl Runtime {
     where
         F: FnOnce() -> Box<dyn TelemetryPlugin>,
     {
-        Self::validate_version(version)?;
+        let api_version = Self::validate_version(TelemetryApiVersion::from_raw(version))?;
 
         // SAFETY: `initialize_inner` inherits the raw initialization pointer
         // contract documented by `Runtime::initialize`.
-        let api = unsafe { TelemetryApi::from_raw(params) }.map_err(PluginError::from)?;
-        let game = GameInfo::new(api.game_name(), api.game_id(), api.game_version());
+        let api =
+            unsafe { TelemetryApi::from_raw(api_version, params) }.map_err(PluginError::from)?;
+        let game = GameInfo::new(api.game_name(), api.game_id(), api.game_schema_version());
 
         self.ensure_idle()?;
-        let prepared = Self::prepare_plugin(&api, &game, factory)?;
+        let prepared = Self::prepare_plugin(&api, api_version, &game, factory)?;
+        let metadata = prepared.metadata;
+        let event_count = prepared.events.len();
+        let channel_count = prepared.channels.len();
         let generation = self.install_generation(&api, &game, prepared);
 
         let registration_result = api.with_call(|call| self.register_all(call));
@@ -200,31 +211,36 @@ impl Runtime {
         api.with_call(|call| {
             let context = PluginContext::callback(call, game);
             context.message(format_args!(
-                "[scs-sdk-plugin] initialized for {} ({}) game version {}.{}",
-                context.game().name(),
-                context.game().id(),
-                context.game().version_major(),
-                context.game().version_minor(),
+                concat!(
+                    "[scs-sdk-plugin] initialized plugin name={:?} version={:?} ",
+                    "events={} channels={}"
+                ),
+                metadata.name(),
+                metadata.version(),
+                event_count,
+                channel_count,
             ));
         });
 
         Ok(())
     }
 
-    fn validate_version(version: sys::ScsU32) -> PluginResult {
-        if version == sys::SCS_TELEMETRY_VERSION_CURRENT {
-            return Ok(());
+    fn validate_version(version: TelemetryApiVersion) -> PluginResult<TelemetryApiVersion> {
+        // SDK 1.14 defines 1.00 and 1.01 with the same concrete initialization
+        // structure, so both have an audited adapter. Keep this as an exact
+        // whitelist: a future 1.02 structure must be reviewed and added here
+        // instead of being interpreted as the current layout by numeric range.
+        match version {
+            TelemetryApiVersion::V1_00 | TelemetryApiVersion::V1_01 => Ok(version),
+            _ => Err(PluginError::new(
+                SdkError::Unsupported,
+                format!(
+                    "unsupported telemetry API {version}, supported versions are {} and {}",
+                    TelemetryApiVersion::V1_00,
+                    TelemetryApiVersion::V1_01,
+                ),
+            )),
         }
-        Err(PluginError::new(
-            SdkError::Unsupported,
-            format!(
-                "unsupported telemetry API {}.{}, expected {}.{}",
-                sys::version_major(version),
-                sys::version_minor(version),
-                sys::version_major(sys::SCS_TELEMETRY_VERSION_CURRENT),
-                sys::version_minor(sys::SCS_TELEMETRY_VERSION_CURRENT),
-            ),
-        ))
     }
 
     fn ensure_idle(&self) -> PluginResult {
@@ -239,6 +255,7 @@ impl Runtime {
 
     fn prepare_plugin<F>(
         api: &TelemetryApi<'_>,
+        api_version: TelemetryApiVersion,
         game: &GameInfo,
         factory: F,
     ) -> PluginResult<PreparedPlugin>
@@ -246,6 +263,42 @@ impl Runtime {
         F: FnOnce() -> Box<dyn TelemetryPlugin>,
     {
         let mut plugin = factory();
+        let metadata = plugin.metadata();
+        if metadata.name().trim().is_empty() || metadata.version().trim().is_empty() {
+            let error = PluginError::new(
+                SdkError::InvalidParameter,
+                "plugin metadata name and version must both be non-empty",
+            );
+            api.with_call(|call| {
+                let context = PluginContext::callback(call, game.clone());
+                context.error(format_args!("plugin metadata is invalid: {error}"));
+            });
+            return Err(error);
+        }
+
+        api.with_call(|call| {
+            let context = PluginContext::callback(call, game.clone());
+            context.message(format_args!(
+                concat!(
+                    "[scs-sdk-plugin] starting plugin name={:?} version={:?} ",
+                    "framework_version={:?}"
+                ),
+                metadata.name(),
+                metadata.version(),
+                env!("CARGO_PKG_VERSION"),
+            ));
+            context.message(format_args!(
+                concat!(
+                    "[scs-sdk-plugin] detected game_display_name={:?} game_id={:?} ",
+                    "telemetry_api={} telemetry_schema={}"
+                ),
+                game.name(),
+                game.id(),
+                api_version,
+                game.schema_version(),
+            ));
+        });
+
         let mut events = Vec::new();
         let mut subscriptions = Vec::new();
         let result = api.with_call(|call| {
@@ -263,6 +316,7 @@ impl Runtime {
         }
         Ok(PreparedPlugin {
             plugin,
+            metadata,
             events,
             channels: subscriptions,
         })
@@ -280,6 +334,7 @@ impl Runtime {
         state.session = Some(api.session());
         state.game = Some(game.clone());
         state.plugin = Some(prepared.plugin);
+        state.metadata = Some(prepared.metadata);
         state.events = prepared
             .events
             .into_iter()
@@ -461,10 +516,17 @@ impl Runtime {
             }
         }
 
-        let game = self.lock_state().game.clone();
-        if let Some(game) = game {
+        let (game, metadata) = {
+            let state = self.lock_state();
+            (state.game.clone(), state.metadata)
+        };
+        if let (Some(game), Some(metadata)) = (game, metadata) {
             let context = PluginContext::callback(call, game);
-            context.message(format_args!("[scs-sdk-plugin] shutdown complete"));
+            context.message(format_args!(
+                "[scs-sdk-plugin] shutdown complete plugin name={:?} version={:?}",
+                metadata.name(),
+                metadata.version(),
+            ));
         }
         self.finish_generation(generation);
     }
@@ -573,6 +635,7 @@ impl Runtime {
             }
         }
         state.plugin = None;
+        state.metadata = None;
         state.game = None;
         state.session = None;
         state.lifecycle = Lifecycle::Idle;
@@ -589,6 +652,7 @@ impl Runtime {
         let events = std::mem::take(&mut state.events);
         state.retired_events.extend(events);
         state.plugin = None;
+        state.metadata = None;
         state.game = None;
         state.session = None;
         state.lifecycle = Lifecycle::Idle;
@@ -867,6 +931,7 @@ mod tests {
     );
 
     struct Harness {
+        logs: Vec<(sys::ScsLogType, String)>,
         events: Vec<EventRecord>,
         channels: Vec<ChannelRecord>,
         fail_channel_registration: bool,
@@ -876,6 +941,7 @@ mod tests {
     impl Harness {
         const fn new() -> Self {
             Self {
+                logs: Vec::new(),
                 events: Vec::new(),
                 channels: Vec::new(),
                 fail_channel_registration: false,
@@ -884,6 +950,7 @@ mod tests {
         }
 
         fn reset(&mut self) {
+            self.logs.clear();
             self.events.clear();
             self.channels.clear();
             self.fail_channel_registration = false;
@@ -908,7 +975,14 @@ mod tests {
         }
     }
 
-    unsafe extern "system" fn fake_log(_level: sys::ScsLogType, _message: sys::ScsString) {}
+    unsafe extern "system" fn fake_log(level: sys::ScsLogType, message: sys::ScsString) {
+        // SAFETY: The framework passes a live NUL-terminated CString for the
+        // duration of this direct logger invocation.
+        let message = unsafe { CStr::from_ptr(message) }
+            .to_string_lossy()
+            .into_owned();
+        harness().logs.push((level, message));
+    }
 
     unsafe extern "system" fn fake_register_event(
         event: sys::ScsEvent,
@@ -1013,6 +1087,10 @@ mod tests {
     }
 
     impl TelemetryPlugin for TestPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Runtime test plugin", "0.0.0-test")
+        }
+
         fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
             self.counts.initializes.fetch_add(1, Ordering::Relaxed);
             context.subscribe_event(TelemetryEventKind::Started)?;
@@ -1059,6 +1137,28 @@ mod tests {
                 move || Box::new(TestPlugin { counts }),
             )
         }
+    }
+
+    #[test]
+    fn telemetry_api_negotiation_accepts_only_the_audited_layout() {
+        assert_eq!(
+            Runtime::validate_version(TelemetryApiVersion::V1_00)
+                .expect("1.00 uses an audited initialization layout"),
+            TelemetryApiVersion::V1_00,
+        );
+        assert_eq!(
+            Runtime::validate_version(TelemetryApiVersion::V1_01)
+                .expect("1.01 is the audited runtime ABI"),
+            TelemetryApiVersion::V1_01,
+        );
+
+        let future = Runtime::validate_version(TelemetryApiVersion::new(1, 2))
+            .expect_err("future layouts require a dedicated audited adapter");
+        assert_eq!(future.result(), SdkError::Unsupported);
+        assert_eq!(
+            future.message(),
+            "unsupported telemetry API 1.2, supported versions are 1.0 and 1.1",
+        );
     }
 
     fn started_record(first: bool) -> EventInvocation {
@@ -1169,6 +1269,40 @@ mod tests {
         assert_eq!(first.initializes.load(Ordering::Relaxed), 1);
         assert_eq!(harness().events.len(), 1);
         assert_eq!(harness().channels.len(), 1);
+        assert_eq!(
+            harness().logs,
+            vec![
+                (
+                    sys::SCS_LOG_TYPE_MESSAGE,
+                    format!(
+                        concat!(
+                            "[scs-sdk-plugin] starting plugin ",
+                            "name=\"Runtime test plugin\" version=\"0.0.0-test\" ",
+                            "framework_version=\"{}\""
+                        ),
+                        env!("CARGO_PKG_VERSION"),
+                    ),
+                ),
+                (
+                    sys::SCS_LOG_TYPE_MESSAGE,
+                    concat!(
+                        "[scs-sdk-plugin] detected ",
+                        "game_display_name=\"Euro Truck Simulator 2\" game_id=\"eut2\" ",
+                        "telemetry_api=1.1 telemetry_schema=1.56"
+                    )
+                    .to_owned(),
+                ),
+                (
+                    sys::SCS_LOG_TYPE_MESSAGE,
+                    concat!(
+                        "[scs-sdk-plugin] initialized plugin ",
+                        "name=\"Runtime test plugin\" version=\"0.0.0-test\" ",
+                        "events=1 channels=1"
+                    )
+                    .to_owned(),
+                ),
+            ],
+        );
         invoke_speed(27.5);
         invoke_event(started_record(true));
         assert_eq!(first.speed_bits.load(Ordering::Relaxed), 27.5_f32.to_bits());
@@ -1184,6 +1318,13 @@ mod tests {
         runtime.shutdown();
         assert_eq!(first.shutdowns.load(Ordering::Relaxed), 1);
         assert!(harness().channels.is_empty());
+        assert!(harness().logs.iter().any(|(_, message)| {
+            message
+                == concat!(
+                    "[scs-sdk-plugin] shutdown complete plugin ",
+                    "name=\"Runtime test plugin\" version=\"0.0.0-test\""
+                )
+        }));
 
         harness().fail_event_unregistration = false;
         let second = Arc::new(Counts::default());
@@ -1215,14 +1356,34 @@ mod tests {
     struct EmptyPlugin;
 
     impl TelemetryPlugin for EmptyPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Empty test plugin", "0.0.0-test")
+        }
+
         fn initialize(&mut self, _context: &mut PluginContext<'_>) -> PluginResult {
             Ok(())
+        }
+    }
+
+    struct InvalidMetadataPlugin;
+
+    impl TelemetryPlugin for InvalidMetadataPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("", "")
+        }
+
+        fn initialize(&mut self, _context: &mut PluginContext<'_>) -> PluginResult {
+            panic!("invalid metadata must be rejected before product initialization");
         }
     }
 
     struct DuplicateEventPlugin;
 
     impl TelemetryPlugin for DuplicateEventPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Duplicate event test plugin", "0.0.0-test")
+        }
+
         fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
             context.subscribe_event(TelemetryEventKind::Started)?;
             context.subscribe_event(TelemetryEventKind::Started)
@@ -1262,6 +1423,25 @@ mod tests {
         empty_runtime.shutdown();
         harness().reset();
         drop(empty_owner);
+
+        let invalid_metadata_owner = TestRuntimeOwner::new();
+        let invalid_metadata_runtime = invalid_metadata_owner.runtime();
+        assert_eq!(
+            initialize_without_counts(invalid_metadata_runtime, InvalidMetadataPlugin),
+            sys::SCS_RESULT_INVALID_PARAMETER,
+        );
+        assert!(harness().events.is_empty());
+        assert!(harness().channels.is_empty());
+        assert!(harness().logs.iter().any(|(level, message)| {
+            *level == sys::SCS_LOG_TYPE_ERROR
+                && message
+                    == concat!(
+                        "plugin metadata is invalid: ",
+                        "plugin metadata name and version must both be non-empty"
+                    )
+        }));
+        harness().reset();
+        drop(invalid_metadata_owner);
 
         let duplicate_owner = TestRuntimeOwner::new();
         assert_eq!(

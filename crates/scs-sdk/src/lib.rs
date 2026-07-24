@@ -20,6 +20,7 @@ mod error;
 mod event;
 pub mod gameplay;
 mod value;
+mod version;
 
 pub use api::{LogLevel, ScopedLogger, SdkCall, TelemetryApi, TelemetrySession};
 pub use channel::{AnyChannel, Channel, ChannelFlags, ChannelValue, channels};
@@ -31,5 +32,6 @@ pub use event::{
 pub use value::{
     DPlacement, DVector, Euler, FPlacement, FVector, SdkValue, StringValue, ValueRef, ValueType,
 };
+pub use version::{GameSchemaVersion, TelemetryApiVersion};
 
 pub use scs_sdk_sys as sys;

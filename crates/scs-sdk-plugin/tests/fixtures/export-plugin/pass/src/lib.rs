@@ -17,7 +17,7 @@
     clippy::unwrap_used
 )]
 
-use scs_sdk_plugin::{PluginContext, PluginResult, TelemetryPlugin};
+use scs_sdk_plugin::{PluginContext, PluginMetadata, PluginResult, TelemetryPlugin};
 
 /// Minimal product-owned state used to prove the constructor expression is
 /// accepted without any raw SDK types or framework-private imports.
@@ -27,6 +27,11 @@ struct Plugin {
 }
 
 impl TelemetryPlugin for Plugin {
+    /// Supplies explicit identity without relying on the fixture package name.
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new("Export fixture", env!("CARGO_PKG_VERSION"))
+    }
+
     /// Performs an explicit state transition while requesting no subscriptions.
     ///
     /// A zero-subscription plugin is useful here: the fixture tests macro and

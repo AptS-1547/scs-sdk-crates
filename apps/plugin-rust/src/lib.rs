@@ -22,7 +22,8 @@
 use scs_sdk_plugin::sdk::{DPlacement, channels, configuration, gameplay};
 use scs_sdk_plugin::{
     ChannelUpdate, ConfigurationEvent, Game, GameplayEvent, PluginContext, PluginError,
-    PluginResult, TelemetryEvent, TelemetryEventKind, TelemetryPlugin, export_plugin,
+    PluginMetadata, PluginResult, TelemetryEvent, TelemetryEventKind, TelemetryPlugin,
+    export_plugin,
 };
 
 /// Probe output is rate-limited to one line per real-time second.
@@ -302,6 +303,10 @@ impl DispatchPlugin {
 }
 
 impl TelemetryPlugin for DispatchPlugin {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new("ETS2 Dispatch Telemetry", env!("CARGO_PKG_VERSION"))
+    }
+
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
         *self = Self::default();
 

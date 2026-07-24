@@ -14,7 +14,7 @@ ETS2 Dispatch 的长期目标是为 Euro Truck Simulator 2 提供外置网页仪
 2. **产品意图必须显式**：框架不会因为插件实现了某个回调，就猜测它想订阅对应事件，也不会自动订阅整个 channel catalog。
 3. **应用插件只写 safe Rust**：裸指针、C 字符串、FFI callback、导出符号与 `unsafe` 全部收口在框架及更低层。
 4. **正确性事务由框架负责**：注册成功后的逆序回滚、shutdown 注销、panic containment、stale callback 隔离和 context 保活属于生命周期机制，不要求每个产品插件重复实现。
-5. **跨平台产物可验证**：Windows DLL 和 Linux shared object 都在构建后检查架构与 SCS 必需导出，而不是只看文件扩展名。
+5. **跨平台产物可验证**：Windows DLL、Linux shared object 与 macOS dynamic library 都在构建后检查架构与 SCS 必需导出，而不是只看文件扩展名。
 
 ## SDK 1.14 覆盖范围
 
@@ -111,6 +111,7 @@ SDK 规定调回游戏的 API 只能在主线程，并且只能发生在游戏�
 `crates/scs-sdk-plugin/` 把底层能力组合成应用可用的 safe framework：
 
 - `TelemetryPlugin` 生命周期；
+- 通过必需的 `PluginMetadata` 显式声明产品身份；
 - `PluginContext` 显式 event/channel subscription；
 - owned `GameInfo` 与 `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}` 类型化游戏判断；
 - `ChannelUpdate` 的 descriptor、SDK index、trailer index 与 typed value 解码；
@@ -124,6 +125,14 @@ SDK 规定调回游戏的 API 只能在主线程，并且只能发生在游戏�
 - 注销失败时的 foreign context 保活。
 
 注册 context 使用 `Arc<Registration>` 持有稳定 pointee，并使用 `AtomicBool` 表示 SDK 侧是否仍注册。active/retired 集合只移动 `Arc` handle，不移动 allocation，也不通过重新创建独占借用破坏 foreign pointer provenance。每次 session 还有独立 generation，旧 session 即使延迟触发 callback，也不会进入新插件实例。该模型已经使用 Miri strict provenance 验证。
+
+runtime 会在产品初始化前记录产品与兼容性身份，并在注册提交后输出实际 event/channel 数量。`game_display_name` 是 SCS 提供的完整展示字符串，API 与 schema 版本则保持为独立的强类型字段：
+
+```text
+[scs-sdk-plugin] starting plugin name="ETS2 Dispatch Telemetry" version="0.1.0" framework_version="0.1.0"
+[scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
+[scs-sdk-plugin] initialized plugin name="ETS2 Dispatch Telemetry" version="0.1.0" events=6 channels=8
+```
 
 ### `scs-sdk-plugin-macros`
 
@@ -147,7 +156,7 @@ scs_telemetry_shutdown
 - `pass`：实现 `TelemetryPlugin`，以 `export_plugin!(Plugin::default())` 构建真实 `cdylib`；
 - `missing-trait`：保留相同构造表达式但省略 trait 实现，必须以 E0277 和 `TelemetryPlugin` trait-bound 失败。
 
-正向 fixture 使用 `#![forbid(unsafe_code)]`，同时接受和应用插件一致的源码边界审计。Windows PE 与 Linux ELF 构建还会在 LTO 和 symbol stripping 后检查 `scs_telemetry_init`、`scs_telemetry_shutdown` 的动态导出，避免把“宏语法展开成功”误当成“游戏 loader 确实可见符号”。proc-macro rustdoc 示例继续标记为 ignored，是因为 macro crate 反向 dev-depend framework 会形成 Cargo 依赖环；独立 fixture 正是这个依赖边界的长期测试入口。
+正向 fixture 使用 `#![forbid(unsafe_code)]`，同时接受和应用插件一致的源码边界审计。Windows PE、Linux ELF 与 macOS Mach-O 构建还会在 LTO 和 symbol stripping 后检查 `scs_telemetry_init`、`scs_telemetry_shutdown` 的外部导出，避免把“宏语法展开成功”误当成“游戏 loader 确实可见符号”。proc-macro rustdoc 示例继续标记为 ignored，是因为 macro crate 反向 dev-depend framework 会形成 Cargo 依赖环；独立 fixture 正是这个依赖边界的长期测试入口。
 
 ## 显式订阅
 
@@ -156,12 +165,16 @@ scs_telemetry_shutdown
 ```rust
 use scs_sdk_plugin::sdk::{ChannelFlags, channels};
 use scs_sdk_plugin::{
-    PluginContext, PluginResult, TelemetryEventKind, TelemetryPlugin,
+    PluginContext, PluginMetadata, PluginResult, TelemetryEventKind, TelemetryPlugin,
 };
 
 struct Plugin;
 
 impl TelemetryPlugin for Plugin {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new("My Telemetry Plugin", env!("CARGO_PKG_VERSION"))
+    }
+
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
         context.subscribe_event(TelemetryEventKind::Started)?;
         context.subscribe_event(TelemetryEventKind::FrameEnd)?;
@@ -222,7 +235,7 @@ crates/scs-sdk/                 no_std typed wrapper 与完整 catalog
 crates/scs-sdk-plugin/          safe plugin 生命周期框架
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
   tests/fixtures/export-plugin/ 独立宏 compile-pass/fail cdylib workspace
-scripts/                        Windows/Linux 构建与产物验证
+scripts/                        Windows/Linux/macOS 构建与产物验证
 third-party/scs_sdk_1_14/       官方 SDK 原始分发与许可证
 tmp/                            本地调查、日志结论和设计笔记
 ```
@@ -231,7 +244,7 @@ tmp/                            本地调查、日志结论和设计笔记
 
 ## 开发环境
 
-仓库通过 `rust-toolchain.toml` 固定 Rust `1.85.0`，声明 `rustfmt`、`clippy`、Windows GNU 与 Linux GNU targets。
+仓库通过 `rust-toolchain.toml` 固定 Rust `1.85.0`，声明 `rustfmt`、`clippy`、Windows GNU、Linux GNU 与 macOS x86-64 targets。
 
 基础要求：
 
@@ -304,7 +317,7 @@ MIRIFLAGS=-Zmiri-strict-provenance \
 - `SdkCall` 不可逃逸且不实现 `Send`/`Sync` 的 compile-fail doctest；
 - proc-macro 正向 consumer 独立编译、严格 Clippy 和 safe-source 审计；
 - 缺少 `TelemetryPlugin` 实现时精确产生 E0277 trait-bound failure；
-- Windows PE 与 Linux ELF fixture 均保留两个 loader-visible SCS exports；
+- Windows PE、Linux ELF 与 macOS Mach-O fixture 均保留两个 loader-visible SCS exports；
 - 全 workspace rustdoc 在 `-Dwarnings` 下没有失效的 intra-doc links；
 - owned game metadata 与 Rust string boundary；
 - scalar、indexed 和 multi-trailer 订阅命名；
@@ -319,7 +332,7 @@ workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号�
 
 ## 持续集成
 
-`.github/workflows/rust.yml` 参考 AsterDrive 的 Rust workflow 组织方式，保留只读仓库权限、相同分支新提交的并发取消、路径过滤、固定超时和独立 Rust cache。ETS2 Dispatch 根据自身基座边界拆成六个并行 gate：
+`.github/workflows/rust.yml` 参考 AsterDrive 的 Rust workflow 组织方式，保留只读仓库权限、相同分支新提交的并发取消、路径过滤、固定超时和独立 Rust cache。ETS2 Dispatch 根据自身基座边界拆成七个并行 gate：
 
 | Job | 验证内容 |
 | --- | --- |
@@ -329,6 +342,7 @@ workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号�
 | `Miri (scs-sdk-plugin)` | runtime strict provenance、context 生命周期和 stale generation 验证 |
 | `Windows x86-64 plugin` | 产品与独立宏 fixture 的 MinGW release DLL、PE32+/x86-64 和两个 SCS dynamic exports |
 | `Linux x86-64 plugin (glibc 2.17)` | 产品与独立宏 fixture 的 Zig release shared object、ELF/x86-64 和两个 SCS dynamic exports |
+| `macOS x86-64 plugin` | 产品与独立宏 fixture 的 release dynamic library、Mach-O/x86-64 和两个 SCS external exports |
 
 CI 固定使用：
 
@@ -340,7 +354,7 @@ cargo-zigbuild:     0.23.0
 Linux glibc floor:  2.17
 ```
 
-Windows 和 Linux job 会上传已经通过格式及导出检查的插件产物，保留 7 天。workflow 支持 `master` push、面向 `master` 的 pull request 和手动触发；只有 SDK 基座、构建脚本、工具链或 workflow 自身变化时才运行，README 与后续网页目录里的独立改动不会触发整套 Miri 和跨平台构建。
+Windows、Linux 与 macOS job 会上传已经通过格式及导出检查的插件产物，保留 7 天。workflow 支持 `master` push、面向 `master` 的 pull request 和手动触发；只有 SDK 基座、构建脚本、工具链或 workflow 自身变化时才运行，README 与后续网页目录里的独立改动不会触发整套 Miri 和跨平台构建。
 
 ## 构建与验证
 
@@ -400,6 +414,36 @@ target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so
 scripts/verify-linux-plugin.sh PATH_TO_SHARED_OBJECT
 ```
 
+### macOS x86-64
+
+```bash
+scripts/build-macos-plugin.sh
+```
+
+当前 macOS 版 ETS2 可执行文件仍为 x86-64；在 Apple Silicon 上也通过 Rosetta 运行。因此脚本显式选择 `x86_64-apple-darwin`，不会跟随构建机生成 arm64 插件。
+
+产物：
+
+```text
+target/x86_64-apple-darwin/release/libets2_dispatch_telemetry_rust.dylib
+```
+
+脚本会检查：
+
+- Mach-O 64-bit dynamically linked shared library；
+- x86-64 architecture；
+- 有效的 embedded code signature；本地与 CI 构建使用 ad-hoc identity；
+- Mach-O C ABI 使用的 external `_scs_telemetry_init` symbol；
+- Mach-O C ABI 使用的 external `_scs_telemetry_shutdown` symbol。
+
+ad-hoc signature 能为本地构建提供可验证的 code directory，但它不等于 Developer ID signing 或 notarization。公开 release pipeline 后续应替换为项目自己的 Developer ID 签名与 notarized 分发包。
+
+也可单独验证已有产物：
+
+```bash
+scripts/verify-macos-plugin.sh PATH_TO_DYNAMIC_LIBRARY
+```
+
 ### Proc-macro 独立 fixture
 
 只检查正向/负向编译契约、格式、Clippy 和 safe source：
@@ -420,7 +464,13 @@ scripts/build-windows-plugin-macro-fixture.sh
 scripts/build-linux-plugin-macro-fixture.sh
 ```
 
-fixture 产物位于 `target/plugin-macro-fixtures/`，仅用于验证 proc-macro 的 consumer contract，不作为 ETS2 Dispatch 产品插件分发。游戏安装仍使用本节前面列出的 `ets2_dispatch_telemetry_rust.dll` 或 `libets2_dispatch_telemetry_rust.so`。
+构建 macOS x86-64 fixture 并验证真实 Mach-O exports：
+
+```bash
+scripts/build-macos-plugin-macro-fixture.sh
+```
+
+fixture 产物位于 `target/plugin-macro-fixtures/`，仅用于验证 proc-macro 的 consumer contract，不作为 ETS2 Dispatch 产品插件分发。游戏安装使用本节前面列出的对应平台产品产物。
 
 ## 安装到 ETS2
 
@@ -436,12 +486,34 @@ Linux shared object 放入：
 bin/linux_x64/plugins/libets2_dispatch_telemetry_rust.so
 ```
 
+macOS dynamic library 放入：
+
+```text
+<ETS2 安装目录>/Euro Truck Simulator 2.app/Contents/MacOS/plugins/libets2_dispatch_telemetry_rust.dylib
+```
+
+Steam library 位于当前用户默认位置时，`<ETS2 安装目录>` 通常是 `~/Library/Application Support/Steam/steamapps/common/Euro Truck Simulator 2`。SCS 从游戏可执行文件旁的 `plugins` 目录发现插件；这里与保存 profile 和日志的用户数据目录不是同一个位置。
+
+仓库安装脚本会清除下载产物的 quarantine 属性，对私有副本应用 ad-hoc 签名，完成验证后再写入该目录：
+
+```bash
+scripts/install-macos-plugin.sh
+```
+
+macOS App Management 会控制对其他 application bundle 的写入。如果安装时报 `Operation not permitted`，需要在 **系统设置 -> 隐私与安全性 -> App Management** 中允许当前终端，重启终端后重新执行。安装脚本不会重签 ETS2 application；那样会替换 SCS Software 的 Developer ID 与已公证应用签名。
+
 不要同时放置多个实现相同探针的 telemetry plugin，否则它们会分别注册 channel 并产生重复日志。首次加载第三方 SDK plugin 时，ETS2 可能显示确认提示。
 
 Windows 游戏日志通常位于：
 
 ```text
 Documents/Euro Truck Simulator 2/game.log.txt
+```
+
+macOS 游戏日志通常位于：
+
+```text
+~/Library/Application Support/Euro Truck Simulator 2/game.log.txt
 ```
 
 当前探针日志前缀：

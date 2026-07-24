@@ -44,8 +44,8 @@ use std::fmt;
 
 use scs_sdk::{
     AnyChannel, Attribute, Channel, ChannelFlags, ChannelValue, ConfigurationId, ConfigurationRef,
-    Event, FrameStartRef, GameplayEventId, GameplayEventRef, LogLevel, SdkCall, SdkError, SdkValue,
-    StringValue, ValueRef,
+    Event, FrameStartRef, GameSchemaVersion, GameplayEventId, GameplayEventRef, LogLevel, SdkCall,
+    SdkError, SdkValue, StringValue, ValueRef,
 };
 
 /// Typed descriptor and value layer used when implementing plugin hooks.
@@ -129,11 +129,11 @@ pub struct GameInfo {
     name: String,
     id: String,
     kind: Game,
-    version: u32,
+    schema_version: GameSchemaVersion,
 }
 
 impl GameInfo {
-    pub(crate) fn new(name: &CStr, id: &CStr, version: u32) -> Self {
+    pub(crate) fn new(name: &CStr, id: &CStr, schema_version: GameSchemaVersion) -> Self {
         let kind = match id.to_bytes() {
             b"eut2" => Game::EuroTruckSimulator2,
             b"ats" => Game::AmericanTruckSimulator,
@@ -143,7 +143,7 @@ impl GameInfo {
             name: name.to_string_lossy().into_owned(),
             id: id.to_string_lossy().into_owned(),
             kind,
-            version,
+            schema_version,
         }
     }
 
@@ -168,22 +168,12 @@ impl GameInfo {
         self.kind
     }
 
-    /// Packed game version supplied by the SDK, not the telemetry API version.
+    /// Game-specific telemetry schema supplied by the SDK.
+    ///
+    /// This does not represent the telemetry API ABI or the public game patch.
     #[must_use]
-    pub const fn version(&self) -> u32 {
-        self.version
-    }
-
-    /// Major component of the packed game version.
-    #[must_use]
-    pub const fn version_major(&self) -> u32 {
-        scs_sdk_sys::version_major(self.version)
-    }
-
-    /// Minor component of the packed game version.
-    #[must_use]
-    pub const fn version_minor(&self) -> u32 {
-        scs_sdk_sys::version_minor(self.version)
+    pub const fn schema_version(&self) -> GameSchemaVersion {
+        self.schema_version
     }
 }
 
@@ -797,6 +787,41 @@ pub enum TelemetryEvent<'a> {
     Gameplay(GameplayEvent<'a>),
 }
 
+/// Static identity reported by the framework during plugin lifecycle logging.
+///
+/// Metadata is supplied by the product instead of inferred from Rust type names
+/// or Cargo package names. This keeps the user-facing identity explicit and
+/// stable even when the implementation type, workspace layout, or crate name
+/// changes independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PluginMetadata {
+    name: &'static str,
+    version: &'static str,
+}
+
+impl PluginMetadata {
+    /// Creates product metadata from static build information.
+    ///
+    /// `env!("CARGO_PKG_VERSION")` is suitable for `version`; the product name
+    /// should be the stable human-facing plugin identity shown in game logs.
+    #[must_use]
+    pub const fn new(name: &'static str, version: &'static str) -> Self {
+        Self { name, version }
+    }
+
+    /// Stable human-facing plugin name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    /// Product version embedded when the plugin was built.
+    #[must_use]
+    pub const fn version(self) -> &'static str {
+        self.version
+    }
+}
+
 /// Application-facing telemetry plugin lifecycle.
 ///
 /// Every method is called synchronously on the SDK thread. The framework catches
@@ -804,6 +829,12 @@ pub enum TelemetryEvent<'a> {
 /// additionally use `panic = "abort"`, matching a native game plugin's usual
 /// failure policy.
 pub trait TelemetryPlugin: Send + 'static {
+    /// Declares the stable product name and build version used in runtime logs.
+    ///
+    /// This method is required so framework diagnostics never silently fall
+    /// back to an implementation type name or an unrelated workspace package.
+    fn metadata(&self) -> PluginMetadata;
+
     /// Declares subscriptions and initializes plugin-owned state.
     ///
     /// Returning an error aborts initialization before a successful result is
@@ -843,17 +874,24 @@ mod tests {
 
     #[test]
     fn game_info_owns_rust_text_and_classifies_known_ids() {
-        let ets2 = GameInfo::new(c"Euro Truck Simulator 2", c"eut2", 0x0001_0038);
+        let ets2 = GameInfo::new(
+            c"Euro Truck Simulator 2",
+            c"eut2",
+            GameSchemaVersion::new(1, 56),
+        );
         assert_eq!(ets2.kind(), Game::EuroTruckSimulator2);
         assert_eq!(ets2.name(), "Euro Truck Simulator 2");
         assert_eq!(ets2.id(), "eut2");
-        assert_eq!(ets2.version_major(), 1);
-        assert_eq!(ets2.version_minor(), 56);
+        assert_eq!(ets2.schema_version(), GameSchemaVersion::new(1, 56));
 
-        let ats = GameInfo::new(c"American Truck Simulator", c"ats", 0);
+        let ats = GameInfo::new(
+            c"American Truck Simulator",
+            c"ats",
+            GameSchemaVersion::new(0, 0),
+        );
         assert_eq!(ats.kind(), Game::AmericanTruckSimulator);
 
-        let future = GameInfo::new(c"Future Truck", c"future", 0);
+        let future = GameInfo::new(c"Future Truck", c"future", GameSchemaVersion::new(0, 0));
         assert_eq!(future.kind(), Game::Other);
         assert_eq!(future.id(), "future");
     }
