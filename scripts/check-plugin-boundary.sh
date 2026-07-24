@@ -3,13 +3,21 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-plugin_source="$repo_root/apps/plugin-rust"
+plugin_source="${1:-$repo_root/apps/plugin-rust}"
+
+if [[ ! -d "$plugin_source" || ! -f "$plugin_source/Cargo.toml" ]]; then
+  printf 'Plugin crate does not exist or has no Cargo.toml: %s\n' "$plugin_source" >&2
+  exit 1
+fi
 
 # Product code must stay on the safe framework side of the architecture. This
 # list intentionally checks both direct FFI syntax and the common ways raw SDK
-# types could leak upward. Framework crates have their own audited unsafe
-# boundary and are outside the scope of this application-only check.
-forbidden_rust_pattern='CStr|CString|c"|\bunsafe\b|extern[[:space:]]+"(C|system)"|no_mangle|ScsContext|ScsString|\*const|\*mut|scs_sdk_sys|::sys\b'
+# types could leak upward. The framework's doc-hidden `__private` module exists
+# solely so the proc-macro expansion can reach its runtime and ABI types; using
+# that path in handwritten plugin code would bypass the public safe API even if
+# the source did not spell an `unsafe` block itself. Framework crates have their
+# own audited unsafe boundary and are outside this application-only check.
+forbidden_rust_pattern='CStr|CString|c"|\bunsafe\b|extern[[:space:]]+"(C|system)"|no_mangle|ScsContext|ScsString|\*const|\*mut|scs_sdk_sys|::sys\b|scs_sdk_plugin::__private'
 
 if rg -n --glob '*.rs' "$forbidden_rust_pattern" "$plugin_source"; then
   printf '%s\n' 'Safe plugin boundary violation: raw ABI detail found in application source.' >&2
@@ -24,4 +32,4 @@ if rg -n 'scs-sdk-sys|scs_sdk_sys' "$plugin_source/Cargo.toml"; then
   exit 1
 fi
 
-printf '%s\n' 'Verified safe Rust boundary for apps/plugin-rust.'
+printf 'Verified safe Rust plugin source: %s\n' "$plugin_source"

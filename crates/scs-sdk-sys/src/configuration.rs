@@ -75,7 +75,7 @@ pub mod ids {
 
     /// Backward compatibility static configuration of the first trailer (attributes are equal to trailer.0).
     ///
-    /// The trailers configurations are returned using trailer.[index]
+    /// The trailers configurations are returned using `trailer.[index]`
     /// (e.g. trailer.0, trailer.1, ... trailer.9 ...)
     ///
     /// SDK currently can return up to `SCS_TELEMETRY_trailers_count` trailers.

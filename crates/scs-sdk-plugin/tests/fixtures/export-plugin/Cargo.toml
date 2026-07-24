@@ -1,0 +1,28 @@
+# This is an intentionally nested workspace rather than a member of the main
+# repository workspace. Its packages model independent third-party plugin
+# crates which only know the public `scs-sdk-plugin` API. Keeping the fixture
+# isolated catches accidental reliance on root-workspace dependencies, lints,
+# features, or implicit imports.
+[workspace]
+members = ["missing-trait", "pass"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# The fixture is three directory levels below the framework crate root. This
+# path behaves like a consumer's normal dependency while still testing the
+# exact checkout under development.
+scs-sdk-plugin = { path = "../../.." }
+
+[profile.release]
+# Match the real plugin profile closely enough that symbol validation exercises
+# the same LTO, panic, and stripping conditions used by application artifacts.
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"

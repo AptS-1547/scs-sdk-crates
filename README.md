@@ -1,50 +1,52 @@
 # ETS2 Dispatch
 
-ETS2 Dispatch 的长期目标是为 Euro Truck Simulator 2 提供外置网页仪表、导航数据和调度能力。仓库当前只推进 **SCS Telemetry SDK 基座**：先把官方 SDK 1.14 的 ABI、类型化 wrapper、插件生命周期和跨平台构建做完整，再讨论 bridge、网页或调度产品。
+**English** | [简体中文](README.zh.md)
 
-当前基座使用纯 Rust 实现，不需要 C++ shim、CMake 或 bindgen。官方 SDK 原始分发仍保留在 `third-party/scs_sdk_1_14/`，它是 ABI 与常量的权威来源。
+The long-term goal of ETS2 Dispatch is to provide Euro Truck Simulator 2 with an external web dashboard, navigation data, and dispatch capabilities. The repository currently focuses exclusively on the **SCS Telemetry SDK foundation**: first complete the official SDK 1.14 ABI, typed wrapper, plugin lifecycle, and cross-platform build pipeline; the bridge, web interface, and dispatch product come later.
 
-## 基座目标
+The current foundation is implemented entirely in Rust and requires no C++ shim, CMake, or bindgen. The original official SDK distribution remains in `third-party/scs_sdk_1_14/` as the authoritative source for the ABI and constants.
 
-当前设计坚持以下边界：
+## Foundation goals
 
-1. **完整覆盖 SDK 1.14**：公开 telemetry headers 中的 ABI、channel、configuration、gameplay event、游戏标识和版本常量均进入 Rust 层。
-2. **产品意图必须显式**：框架不会因为插件实现了某个回调，就猜测它想订阅对应事件，也不会自动订阅整个 channel catalog。
-3. **应用插件只写 safe Rust**：裸指针、C 字符串、FFI callback、导出符号与 `unsafe` 全部收口在框架及更低层。
-4. **正确性事务由框架负责**：注册成功后的逆序回滚、shutdown 注销、panic containment、stale callback 隔离和 context 保活属于生命周期机制，不要求每个产品插件重复实现。
-5. **跨平台产物可验证**：Windows DLL 和 Linux shared object 都在构建后检查架构与 SCS 必需导出，而不是只看文件扩展名。
+The current design maintains the following boundaries:
 
-## SDK 1.14 覆盖范围
+1. **Complete SDK 1.14 coverage**: every ABI definition, channel, configuration item, gameplay event, game identifier, and version constant in the public telemetry headers enters the Rust layers.
+2. **Product intent must be explicit**: the framework does not infer event subscriptions from implemented callbacks, nor does it automatically subscribe to the entire channel catalog.
+3. **Application plugins use safe Rust only**: raw pointers, C strings, FFI callbacks, exported symbols, and `unsafe` are contained within the framework and lower layers.
+4. **The framework owns correctness transactions**: reverse rollback after successful registrations, shutdown unregistration, panic containment, stale callback isolation, and context retention are lifecycle mechanisms that each product plugin should not have to reimplement.
+5. **Cross-platform artifacts are verifiable**: both the Windows DLL and Linux shared object are checked for their architecture and required SCS exports after building, rather than being trusted by filename extension alone.
 
-| 目录 | 数量 | 高层表示 |
+## SDK 1.14 coverage
+
+| Catalog | Count | High-level representation |
 | --- | ---: | --- |
-| Common channels | 4 | `channels::common::*` 与 `channels::common::ALL` |
-| Truck channels | 84 | `channels::truck::*` 与 `channels::truck::ALL` |
-| Trailer channels | 18 | `channels::trailer::*` 与 `channels::trailer::ALL` |
-| Job channels | 1 | `channels::job::*` 与 `channels::job::ALL` |
-| **Channels 合计** | **107** | `channels::ALL` |
-| Configuration IDs | 6 | `configuration::ids::*` 与 `ids::ALL` |
-| Configuration attributes | 60 | `configuration::attributes::*` 与 `attributes::ALL` |
+| Common channels | 4 | `channels::common::*` and `channels::common::ALL` |
+| Truck channels | 84 | `channels::truck::*` and `channels::truck::ALL` |
+| Trailer channels | 18 | `channels::trailer::*` and `channels::trailer::ALL` |
+| Job channels | 1 | `channels::job::*` and `channels::job::ALL` |
+| **Total channels** | **107** | `channels::ALL` |
+| Configuration IDs | 6 | `configuration::ids::*` and `ids::ALL` |
+| Configuration attributes | 60 | `configuration::attributes::*` and `attributes::ALL` |
 | H-shifter values | 4 | `ShifterType` |
-| Gameplay events | 6 | `gameplay::events::*` 与 `events::ALL` |
-| Gameplay attributes | 15 | `gameplay::attributes::*` 与 `attributes::ALL` |
+| Gameplay events | 6 | `gameplay::events::*` and `events::ALL` |
+| Gameplay attributes | 15 | `gameplay::attributes::*` and `attributes::ALL` |
 | Fine offence values | 14 | `FineOffence` |
 
-除此之外，raw ABI 还覆盖：
+The raw ABI additionally covers:
 
-- Telemetry API 版本、初始化参数和函数表；
-- event/channel callback ABI；
-- SDK result code、delivery flags 和 `SCS_U32_NIL`；
-- 所有公开 tagged-union value 类型；
-- `fvector`、`dvector`、Euler、单/双精度 placement；
-- frame-start、configuration 与 gameplay callback payload；
-- ETS2 的 telemetry game version 1.00–1.18；
-- ATS 的 telemetry game version 1.00–1.05；
-- ETS2、ATS 游戏 ID 和游戏版本拆分函数。
+- the Telemetry API version, initialization parameters, and function table;
+- event and channel callback ABIs;
+- SDK result codes, delivery flags, and `SCS_U32_NIL`;
+- every public tagged-union value type;
+- `fvector`, `dvector`, Euler angles, and single- and double-precision placements;
+- frame-start, configuration, and gameplay callback payloads;
+- ETS2 telemetry game versions 1.00 through 1.18;
+- ATS telemetry game versions 1.00 through 1.05;
+- ETS2 and ATS game IDs and game-version component functions.
 
-`ALL` catalog 不是另一套手抄字符串。`scs-sdk-sys` 暴露 header 顺序下的 raw 名称数组，`scs-sdk` 暴露保留 value type 与 indexed/scalar 元数据的 type-erased catalog；测试会逐项比对名称、数量、分组顺序和重复项。具体解码仍使用 `Channel<T>` 与 `Attribute<T>`，不会因为 catalog 可枚举而丢失类型信息。
+The `ALL` catalogs are not another set of manually copied strings. `scs-sdk-sys` exposes raw name arrays in header order, while `scs-sdk` exposes type-erased catalogs that retain value types and indexed/scalar metadata. Tests compare every name, count, group order, and duplicate entry. Concrete decoding still uses `Channel<T>` and `Attribute<T>`, so catalog enumeration does not discard type information.
 
-## 四层结构
+## Four-layer architecture
 
 ```text
 apps/plugin-rust
@@ -64,85 +66,92 @@ scs-sdk-sys             no_std x86-64 ABI definitions
 scs-sdk-plugin-macros   generates the two exported SCS entry points
 ```
 
-从概念边界看，层级为：
+Conceptually, the layers are ordered as follows:
 
 ```text
 scs-sdk-sys <- scs-sdk <- scs-sdk-plugin <- scs-sdk-plugin-macros / application
 ```
 
-实际 Cargo 依赖中，`scs-sdk-plugin` re-export `scs-sdk-plugin-macros`。proc macro 展开后引用调用方已依赖的 `scs_sdk_plugin`，从而避免两个 crate 形成循环依赖。
+In the actual Cargo dependency graph, `scs-sdk-plugin` re-exports `scs-sdk-plugin-macros`. The proc-macro expansion refers to the caller's existing `scs_sdk_plugin` dependency, avoiding a dependency cycle between the two crates.
 
 ### `scs-sdk-sys`
 
-`crates/scs-sdk-sys/` 是手写的 x86-64 C ABI 层：
+`crates/scs-sdk-sys/` is the handwritten x86-64 C ABI layer:
 
-- `no_std`；
-- 零第三方 Rust 依赖；
-- 不运行 bindgen，不要求构建机安装 Clang；
-- 对照官方 SDK 1.14 header 定义函数指针、结构体、union、常量和 raw catalog；
-- 对官方仅用于 ABI 对齐、数值不保证初始化的字段使用 `MaybeUninit<u32>`；
-- 使用编译期断言检查关键结构体大小、对齐和字段 offset；
-- 只声明支持 SCS 游戏使用的 64 位 ABI，不对 32 位目标作保证。
+- it is `no_std`;
+- it has no third-party Rust dependencies;
+- it does not run bindgen or require Clang on the build machine;
+- it defines function pointers, structures, unions, constants, and raw catalogs against the official SDK 1.14 headers;
+- it represents fields used only for ABI alignment, whose values are not guaranteed to be initialized, as `MaybeUninit<u32>`;
+- it uses compile-time assertions for critical structure sizes, alignments, and field offsets;
+- it declares support only for the 64-bit ABI used by SCS games and makes no guarantees for 32-bit targets.
 
-这一层允许出现原始指针与外部 ABI，因为它的职责就是准确描述 C 接口；它不负责提供应用层安全抽象。
+Raw pointers and foreign ABIs are allowed in this layer because its responsibility is to describe the C interface accurately. It does not provide application-level safety abstractions.
 
 ### `scs-sdk`
 
-`crates/scs-sdk/` 是 `no_std` 的类型化 wrapper：
+`crates/scs-sdk/` is the `no_std` typed wrapper:
 
-- `TelemetryApi`、`TelemetrySession` 和不可逃逸的 `SdkCall` scope；
-- `ScopedLogger` 与封闭的 `LogLevel`；
-- SDK result code 的完整映射；
-- `Channel<T>`、`AnyChannel`、`ChannelFlags`；
-- `Attribute<T>`、`AnyAttribute`、`ConfigurationId`、`GameplayEventId`；
-- `ValueRef` 对 tagged union 先验证 tag，再读取对应活跃成员；
-- Rust-owned 几何值 `FVector`、`DVector`、`Euler`、`FPlacement`、`DPlacement`；
-- `NamedValues` 哨兵数组迭代与 typed attribute lookup；
-- 107 个 typed channel、60 个 configuration attribute 和 15 个 gameplay attribute 的可枚举 catalog。
+- `TelemetryApi`, `TelemetrySession`, and the non-escaping `SdkCall` scope;
+- `ScopedLogger` and the closed `LogLevel` enum;
+- complete SDK result-code mapping;
+- `Channel<T>`, `AnyChannel`, and `ChannelFlags`;
+- `Attribute<T>`, `AnyAttribute`, `ConfigurationId`, and `GameplayEventId`;
+- `ValueRef`, which validates a tagged union's tag before reading the corresponding active member;
+- Rust-owned geometry values: `FVector`, `DVector`, `Euler`, `FPlacement`, and `DPlacement`;
+- sentinel-array iteration and typed attribute lookup through `NamedValues`;
+- enumerable catalogs for 107 typed channels, 60 configuration attributes, and 15 gameplay attributes.
 
-`DPlacement` 的高层值不携带 ABI padding。它可被复制和长期保存，而 wrapper 在解码时不会读取 SDK 未初始化的对齐字节。
+The high-level `DPlacement` value carries no ABI padding. It can be copied and retained, while the wrapper never reads uninitialized SDK alignment bytes during decoding.
 
-SDK 规定调回游戏的 API 只能在主线程，并且只能发生在游戏直接调用插件的 init、event callback 或 shutdown 作用域中。`SdkCall` 使用 higher-ranked lifetime 限制，safe 代码不能把它返回、保存到全局状态或发送到其他线程。裸 callback/context 注册函数仍位于本层的受审计 `unsafe` 边界，供上层 runtime 使用。
+The SDK requires calls back into the game to occur on the main thread and only while the game is directly invoking plugin initialization, an event callback, or shutdown. `SdkCall` uses a higher-ranked lifetime to prevent safe code from returning it, storing it globally, or sending it to another thread. The raw callback and context registration functions remain inside this layer's audited `unsafe` boundary for use by the runtime above it.
 
 ### `scs-sdk-plugin`
 
-`crates/scs-sdk-plugin/` 把底层能力组合成应用可用的 safe framework：
+`crates/scs-sdk-plugin/` combines the lower-level capabilities into a safe application framework:
 
-- `TelemetryPlugin` 生命周期；
-- `PluginContext` 显式 event/channel subscription；
-- owned `GameInfo` 与 `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}` 类型化游戏判断；
-- `ChannelUpdate` 的 descriptor、SDK index、trailer index 与 typed value 解码；
-- `TelemetryEvent`、`ConfigurationEvent`、`GameplayEvent`；
-- Rust `str`/`String` 形式的游戏信息、configuration string 和 gameplay string；
-- init/reinit/shutdown 状态机；
-- 注册失败后的逆序事务回滚；
-- callback 与 shutdown 中的 panic containment；
-- mutex poison 恢复；
-- 旧 session callback 的 generation 隔离；
-- 注销失败时的 foreign context 保活。
+- the `TelemetryPlugin` lifecycle;
+- explicit event and channel subscriptions through `PluginContext`;
+- owned `GameInfo` and typed game detection through `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}`;
+- descriptor, SDK index, trailer index, and typed value decoding through `ChannelUpdate`;
+- `TelemetryEvent`, `ConfigurationEvent`, and `GameplayEvent`;
+- game information, configuration strings, and gameplay strings as Rust `str`/`String` values;
+- an initialization, reinitialization, and shutdown state machine;
+- reverse transactional rollback after registration failures;
+- panic containment in callbacks and shutdown;
+- mutex poison recovery;
+- generation-based isolation of callbacks from old sessions;
+- retention of foreign contexts when unregistration fails.
 
-注册 context 使用 `Arc<Registration>` 持有稳定 pointee，并使用 `AtomicBool` 表示 SDK 侧是否仍注册。active/retired 集合只移动 `Arc` handle，不移动 allocation，也不通过重新创建独占借用破坏 foreign pointer provenance。每次 session 还有独立 generation，旧 session 即使延迟触发 callback，也不会进入新插件实例。该模型已经使用 Miri strict provenance 验证。
+Registration contexts use `Arc<Registration>` to hold stable pointees and `AtomicBool` to represent whether the SDK side remains registered. The active and retired sets move only `Arc` handles, never the allocation, and do not invalidate foreign-pointer provenance by recreating an exclusive borrow. Each session also has a distinct generation, so even a delayed callback from an old session cannot enter a new plugin instance. This model has been verified under Miri strict provenance.
 
 ### `scs-sdk-plugin-macros`
 
-`crates/scs-sdk-plugin-macros/` 提供：
+`crates/scs-sdk-plugin-macros/` provides:
 
 ```rust
 scs_sdk_plugin::export_plugin!(DispatchPlugin::default());
 ```
 
-宏生成 SCS loader 查找的：
+The macro generates the two symbols discovered by the SCS loader:
 
 ```text
 scs_telemetry_init
 scs_telemetry_shutdown
 ```
 
-同时生成进程内稳定 runtime storage、ABI 参数转换与 unwind boundary。应用 crate 不手写 `extern "system"`、`no_mangle`、raw pointer 或全局 runtime。
+It also generates process-lifetime stable runtime storage, ABI parameter conversion, and an unwind boundary. The application crate does not handwrite `extern "system"`, `no_mangle`, raw pointers, or a global runtime.
 
-## 显式订阅
+The macro is not supported merely by an `ignore`d rustdoc example. `crates/scs-sdk-plugin/tests/fixtures/export-plugin/` is a consumer workspace isolated from the main workspace. It has only a public `scs-sdk-plugin` path dependency and contains two packages:
 
-插件必须在 `initialize` 中逐项声明意图：
+- `pass` implements `TelemetryPlugin` and builds a real `cdylib` from `export_plugin!(Plugin::default())`;
+- `missing-trait` retains the same constructor expression but omits the trait implementation, and must fail with E0277 and a `TelemetryPlugin` trait-bound diagnostic.
+
+The passing fixture uses `#![forbid(unsafe_code)]` and undergoes the same source-boundary audit as the application plugin. Windows PE and Linux ELF builds additionally inspect the final dynamic export tables for `scs_telemetry_init` and `scs_telemetry_shutdown` after LTO and symbol stripping. This avoids confusing “the macro expanded” with “the game loader can actually see the symbols.” The proc-macro rustdoc example remains ignored because a reverse dev-dependency from the macro crate to the framework would create a Cargo dependency cycle; the isolated fixture is the long-term test boundary for that consumer contract.
+
+## Explicit subscriptions
+
+A plugin must declare each intended subscription in `initialize`:
 
 ```rust
 use scs_sdk_plugin::sdk::{ChannelFlags, channels};
@@ -170,67 +179,69 @@ impl TelemetryPlugin for Plugin {
 }
 ```
 
-几个索引概念不会被混在一起：
+The different index concepts remain distinct:
 
-- `subscribe(channel)`：scalar channel；
-- `subscribe_at(channel, sdk_index)`：wheel、selector 等 SDK 数组下标；
-- `subscribe_trailer(channel, trailer_index)`：`trailer.0.*` 至 `trailer.9.*` 名称中的挂车编号；
-- `subscribe_trailer_at(channel, trailer_index, sdk_index)`：指定挂车的 indexed channel；
-- 每组都有 `_with_flags` 版本，用于显式选择 `EACH_FRAME`、`NO_VALUE` 等 delivery flags；
-- `Channel::requesting<U>()` 显式选择 SDK 转换后的 value representation，兼容性最终由游戏注册函数裁定。
+- `subscribe(channel)` subscribes to a scalar channel;
+- `subscribe_at(channel, sdk_index)` selects an SDK array index such as a wheel or selector;
+- `subscribe_trailer(channel, trailer_index)` selects the trailer number encoded in names from `trailer.0.*` through `trailer.9.*`;
+- `subscribe_trailer_at(channel, trailer_index, sdk_index)` selects an indexed channel for a specific trailer;
+- every group has `_with_flags` variants for explicitly selecting delivery flags such as `EACH_FRAME` and `NO_VALUE`;
+- `Channel::requesting<U>()` explicitly selects the value representation requested from the SDK, with final compatibility determined by the game's registration function.
 
-`TelemetryPlugin::initialize` 没有默认实现。空插件若没有显式订阅，runtime 对 SDK 发起的 event/channel 注册次数就是零。重复订阅会在调用 SDK 之前返回 `AlreadyRegistered`；在 callback 或 shutdown 阶段订阅会返回 `NotNow`。
+`TelemetryPlugin::initialize` has no default implementation. If an empty plugin makes no explicit subscriptions, the runtime issues zero event or channel registrations to the SDK. Duplicate subscriptions return `AlreadyRegistered` before calling the SDK, while subscriptions attempted during a callback or shutdown return `NotNow`.
 
-显式意图不等于把资源管理推给产品。插件成功返回后，runtime 才提交注册；任一 SDK 调用失败时，之前已注册项目会按相反顺序注销。正常 shutdown 使用相同的逆序规则。
+Explicit intent does not push resource management into the product. The runtime commits registrations only after the plugin returns successfully. If any SDK call fails, previously registered items are unregistered in reverse order. Normal shutdown follows the same reverse-order rule.
 
-## 应用插件边界
+## Application plugin boundary
 
-`apps/plugin-rust/` 是当前实机探针，也是 framework 的边界样例。它只依赖 `scs-sdk-plugin`，显式订阅当前需要的 6 类 event 和 8 个 channel，然后使用 typed callback 更新 snapshot、记录任务配置和 gameplay event。
+`apps/plugin-rust/` is the current in-game probe and the framework's boundary example. It depends only on `scs-sdk-plugin`, explicitly subscribes to the six event classes and eight channels it currently needs, then uses typed callbacks to update a snapshot and record job configuration and gameplay events.
 
-该目录的源码目标是：
+Source in this directory targets:
 
-- 零 `unsafe`；
-- 零裸指针；
-- 零手写外部 ABI；
-- 零 C 字符串类型或字面量；
-- 零 `scs-sdk-sys` / `::sys` 访问。
+- zero `unsafe`;
+- zero raw pointers;
+- zero handwritten foreign ABI;
+- zero C string types or literals;
+- zero access to `scs-sdk-sys` or `::sys`;
+- zero access to the macro-hygiene implementation in `scs_sdk_plugin::__private`.
 
-可使用仓库内与 CI 共用的检查确认边界没有回退：
+Use the same repository check as CI to ensure this boundary has not regressed:
 
 ```bash
 scripts/check-plugin-boundary.sh
 ```
 
-该脚本同时审计 Rust 源码和 `Cargo.toml`，防止应用直接依赖 `scs-sdk-sys`。wrapper/runtime 中仍会保留必要且有 Safety contract 的 `unsafe`；要求它们表面上也完全消失，只会把 FFI 前提藏起来，而不是让边界更可靠。
+The script audits both Rust source and `Cargo.toml`, preventing the application from depending directly on `scs-sdk-sys` or using the macro-only, doc-hidden `__private` module to reach the raw ABI. The wrapper and runtime still contain necessary `unsafe` blocks with explicit Safety contracts. Making those blocks disappear cosmetically would hide FFI preconditions rather than improve the boundary.
 
 ## Workspace
 
 ```text
-apps/plugin-rust/               safe Rust 实机探针 cdylib
+apps/plugin-rust/               safe Rust in-game probe cdylib
 crates/scs-sdk-sys/             SDK 1.14 raw x86-64 ABI
-crates/scs-sdk/                 no_std typed wrapper 与完整 catalog
-crates/scs-sdk-plugin/          safe plugin 生命周期框架
+crates/scs-sdk/                 no_std typed wrapper and complete catalogs
+crates/scs-sdk-plugin/          safe plugin lifecycle framework
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
-scripts/                        Windows/Linux 构建与产物验证
-third-party/scs_sdk_1_14/       官方 SDK 原始分发与许可证
-tmp/                            本地调查、日志结论和设计笔记
+  tests/fixtures/export-plugin/ isolated macro compile-pass/fail cdylib workspace
+scripts/                        Windows/Linux builds and artifact verification
+third-party/scs_sdk_1_14/       original official SDK distribution and license
+tmp/                            local investigations, log conclusions, and design notes
 ```
 
-`apps/bridge/`、`apps/web/`、`crates/dispatcher/`、`crates/protocol/`、`crates/savegame/`、`crates/telemetry/`、`assets/` 和 `fixtures/` 是后续产品阶段的保留目录，当前不属于 SDK 基座 workspace。
+`apps/bridge/`, `apps/web/`, `crates/dispatcher/`, `crates/protocol/`, `crates/savegame/`, `crates/telemetry/`, `assets/`, and `fixtures/` are reserved for later product phases. They are not currently members of the SDK foundation workspace.
 
-## 开发环境
+## Development environment
 
-仓库通过 `rust-toolchain.toml` 固定 Rust `1.85.0`，声明 `rustfmt`、`clippy`、Windows GNU 与 Linux GNU targets。
+The repository pins Rust `1.85.0` in `rust-toolchain.toml` and declares the `rustfmt` and `clippy` components plus the Windows GNU and Linux GNU targets.
 
-基础要求：
+Base requirements:
 
-- rustup；
-- Cargo；
-- Bash；
-- `file`；
-- nightly Miri，用于 provenance 与生命周期验证。
+- rustup;
+- Cargo;
+- Bash;
+- `file`;
+- nightly Miri for provenance and lifecycle verification.
 
-安装 Miri：
+Install Miri with:
 
 ```bash
 rustup toolchain install nightly-2026-04-12 \
@@ -239,81 +250,87 @@ rustup toolchain install nightly-2026-04-12 \
   --component rust-src
 ```
 
-`rust-src` 用于构建 Miri sysroot；固定日期与 CI 一致，同时由 rustup 自动选择本机 host triple。
+`rust-src` is required to build the Miri sysroot. The pinned date matches CI, while rustup automatically selects the host triple for the current machine.
 
-Windows x64 交叉编译需要 MinGW-w64：
+Cross-compiling for Windows x64 requires MinGW-w64:
 
 ```text
 x86_64-w64-mingw32-gcc
 x86_64-w64-mingw32-objdump
 ```
 
-Linux x86-64 交叉编译使用 Zig 与 `cargo-zigbuild`：
+Linux x86-64 cross-compilation uses Zig and `cargo-zigbuild`:
 
 ```bash
 cargo install cargo-zigbuild --version 0.23.0 --locked
 ```
 
-Linux 产物验证还需要一个能读取 ELF dynamic symbol table 的 `nm`。脚本按顺序查找：
+Linux artifact verification additionally requires an `nm` implementation that can read an ELF dynamic symbol table. The script searches in this order:
 
-1. `$NM` 显式路径；
-2. `x86_64-linux-gnu-nm`；
-3. `llvm-nm`；
-4. Linux 主机上的原生 `nm`。
+1. the explicit path in `$NM`;
+2. `x86_64-linux-gnu-nm`;
+3. `llvm-nm`;
+4. native `nm` on a Linux host.
 
-例如 Homebrew 环境可安装：
+For example, a Homebrew environment can install the required tools with:
 
 ```bash
 brew install mingw-w64 zig
 ```
 
-## 质量门禁
+## Quality gates
 
-完整本地检查：
+Complete local verification:
 
 ```bash
 cargo fmt --all -- --check
 scripts/check-plugin-boundary.sh
+scripts/check-plugin-macro-fixtures.sh
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
+RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps --locked
 cargo +nightly-2026-04-12 miri test --locked -p scs-sdk
 MIRIFLAGS=-Zmiri-strict-provenance \
   cargo +nightly-2026-04-12 miri test --locked -p scs-sdk-plugin
 ```
 
-测试覆盖包括：
+Test coverage includes:
 
-- 所有 SDK result code 与 channel flag；
-- 107/60/15 catalog 的逐项 raw 名称比对、顺序、索引模式和重复项；
-- 每种 primitive/geometry tagged-union 解码；
-- 错误或未知 tag 不读取 inactive union member；
-- 未初始化 ABI padding 不被读取；
-- `SdkCall` 不可逃逸且不实现 `Send`/`Sync` 的 compile-fail doctest；
-- owned game metadata 与 Rust string boundary；
-- scalar、indexed 和 multi-trailer 订阅命名；
-- 显式 event subscription 与空插件零注册；
-- duplicate/invalid-phase subscription 拦截；
-- channel/event dispatch；
-- partial-init 逆序回滚与 shutdown 逆序注销；
-- stale generation callback 拦截；
-- stable context provenance 与无泄漏销毁。
+- every SDK result code and channel flag;
+- item-by-item raw-name, order, indexing-mode, and duplicate checks across the 107/60/15 catalogs;
+- every primitive and geometry tagged-union decoder;
+- avoiding reads from an inactive union member for incorrect or unknown tags;
+- avoiding reads from uninitialized ABI padding;
+- compile-fail doctests proving that `SdkCall` cannot escape and implements neither `Send` nor `Sync`;
+- independent compilation, strict Clippy, and safe-source auditing for the passing proc-macro consumer;
+- an exact E0277 trait-bound failure when the `TelemetryPlugin` implementation is missing;
+- both loader-visible SCS exports in the Windows PE and Linux ELF fixtures;
+- no broken intra-doc links under workspace-wide rustdoc with `-Dwarnings`;
+- owned game metadata and the Rust string boundary;
+- scalar, indexed, and multi-trailer subscription naming;
+- explicit event subscriptions and zero registrations for an empty plugin;
+- duplicate and invalid-phase subscription rejection;
+- channel and event dispatch;
+- reverse rollback after partial initialization and reverse unregistration during shutdown;
+- stale-generation callback rejection;
+- stable context provenance and leak-free destruction.
 
-workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号位的 cast；非测试构建同时拒绝 `unwrap`、`expect`、`panic`、`todo`、`unimplemented` 和 `unreachable`。
+The workspace uses strict Clippy configuration, in particular rejecting casts that may truncate or lose a sign. Non-test builds additionally reject `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, and `unreachable`.
 
-## 持续集成
+## Continuous integration
 
-`.github/workflows/rust.yml` 参考 AsterDrive 的 Rust workflow 组织方式，保留只读仓库权限、相同分支新提交的并发取消、路径过滤、固定超时和独立 Rust cache。ETS2 Dispatch 根据自身基座边界拆成五类并行 gate：
+`.github/workflows/rust.yml` follows the organization of AsterDrive's Rust workflow while retaining read-only repository permissions, cancellation of superseded commits on the same branch, path filtering, fixed timeouts, and independent Rust caches. ETS2 Dispatch divides its own foundation boundaries into six parallel gates:
 
-| Job | 验证内容 |
+| Job | Verification |
 | --- | --- |
-| `Format, Clippy, and boundaries` | rustfmt、shell 语法、应用 safe boundary、全 workspace Clippy |
-| `Workspace tests` | 全 workspace unit tests 和 doctests |
-| `Miri (scs-sdk)` | typed value、union、padding、scope 与 catalog 的 Miri 验证 |
-| `Miri (scs-sdk-plugin)` | runtime strict provenance、context 生命周期和 stale generation 验证 |
-| `Windows x86-64 plugin` | MinGW release DLL、PE32+/x86-64 和两个 SCS dynamic exports |
-| `Linux x86-64 plugin (glibc 2.17)` | Zig release shared object、ELF/x86-64 和两个 SCS dynamic exports |
+| `Format, Clippy, and boundaries` | rustfmt, shell syntax, the safe application boundary, macro compile-pass/fail fixtures, workspace-wide Clippy, and strict rustdoc |
+| `Workspace tests` | all workspace unit tests and doctests |
+| `Miri (scs-sdk)` | typed values, unions, padding, scope, and catalogs under Miri |
+| `Miri (scs-sdk-plugin)` | runtime strict provenance, context lifetimes, and stale-generation behavior |
+| `Windows x86-64 plugin` | MinGW release DLLs for both the product and isolated macro fixture, PE32+/x86-64 format, and both dynamic SCS exports |
+| `Linux x86-64 plugin (glibc 2.17)` | Zig release shared objects for both the product and isolated macro fixture, ELF/x86-64 format, and both dynamic SCS exports |
 
-CI 固定使用：
+CI pins:
 
 ```text
 Rust/MSRV:          1.85.0
@@ -323,9 +340,9 @@ cargo-zigbuild:     0.23.0
 Linux glibc floor:  2.17
 ```
 
-Windows 和 Linux job 会上传已经通过格式及导出检查的插件产物，保留 7 天。workflow 支持 `master` push、面向 `master` 的 pull request 和手动触发；只有 SDK 基座、构建脚本、工具链或 workflow 自身变化时才运行，README 与后续网页目录里的独立改动不会触发整套 Miri 和跨平台构建。
+The Windows and Linux jobs upload plugin artifacts that have passed format and export checks and retain them for seven days. The workflow runs on pushes to `master`, pull requests targeting `master`, and manual dispatch. It runs automatically only when the SDK foundation, build scripts, toolchain, or workflow itself changes; standalone edits to the README or later web directories do not trigger the complete Miri and cross-platform build suite.
 
-## 构建与验证
+## Building and verification
 
 ### Windows x64
 
@@ -333,20 +350,20 @@ Windows 和 Linux job 会上传已经通过格式及导出检查的插件产物�
 scripts/build-windows-plugin.sh
 ```
 
-产物：
+Artifact:
 
 ```text
 target/x86_64-pc-windows-gnu/release/ets2_dispatch_telemetry_rust.dll
 ```
 
-脚本会检查：
+The script checks:
 
-- PE32+ DLL；
-- x86-64 architecture；
-- `scs_telemetry_init` dynamic export；
-- `scs_telemetry_shutdown` dynamic export。
+- PE32+ DLL format;
+- x86-64 architecture;
+- the `scs_telemetry_init` dynamic export;
+- the `scs_telemetry_shutdown` dynamic export.
 
-也可单独验证已有产物：
+An existing artifact can also be verified independently:
 
 ```bash
 scripts/verify-windows-plugin.sh PATH_TO_DLL
@@ -358,74 +375,99 @@ scripts/verify-windows-plugin.sh PATH_TO_DLL
 scripts/build-linux-plugin.sh
 ```
 
-构建使用 glibc 2.17 baseline：
+The build uses a glibc 2.17 baseline:
 
 ```text
 x86_64-unknown-linux-gnu.2.17
 ```
 
-产物：
+Artifact:
 
 ```text
 target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so
 ```
 
-脚本会检查：
+The script checks:
 
-- ELF 64-bit LSB shared object；
-- x86-64 architecture；
-- dynamic symbol table 中的 `scs_telemetry_init`；
-- dynamic symbol table 中的 `scs_telemetry_shutdown`。
+- ELF 64-bit LSB shared-object format;
+- x86-64 architecture;
+- `scs_telemetry_init` in the dynamic symbol table;
+- `scs_telemetry_shutdown` in the dynamic symbol table.
 
-也可单独验证已有产物：
+An existing artifact can also be verified independently:
 
 ```bash
 scripts/verify-linux-plugin.sh PATH_TO_SHARED_OBJECT
 ```
 
-## 安装到 ETS2
+### Isolated proc-macro fixture
 
-Windows DLL 放入：
+Check only the passing/failing compilation contracts, formatting, Clippy, and safe source:
+
+```bash
+scripts/check-plugin-macro-fixtures.sh
+```
+
+Build the Windows fixture and verify its real PE exports:
+
+```bash
+scripts/build-windows-plugin-macro-fixture.sh
+```
+
+Build the Linux glibc 2.17 fixture and verify its real ELF exports:
+
+```bash
+scripts/build-linux-plugin-macro-fixture.sh
+```
+
+Fixture artifacts are written under `target/plugin-macro-fixtures/`. They exist only to verify the proc-macro consumer contract and are not distributed as ETS2 Dispatch product plugins. Install the `ets2_dispatch_telemetry_rust.dll` or `libets2_dispatch_telemetry_rust.so` listed earlier in this section into the game.
+
+## Installing into ETS2
+
+Place the Windows DLL at:
 
 ```text
 bin/win_x64/plugins/ets2_dispatch_telemetry_rust.dll
 ```
 
-Linux shared object 放入：
+Place the Linux shared object at:
 
 ```text
 bin/linux_x64/plugins/libets2_dispatch_telemetry_rust.so
 ```
 
-不要同时放置多个实现相同探针的 telemetry plugin，否则它们会分别注册 channel 并产生重复日志。首次加载第三方 SDK plugin 时，ETS2 可能显示确认提示。
+Do not install multiple telemetry plugins that implement the same probe at the same time, because each will register its own channels and produce duplicate logs. ETS2 may display a confirmation prompt the first time it loads a third-party SDK plugin.
 
-Windows 游戏日志通常位于：
+The Windows game log is normally located at:
 
 ```text
 Documents/Euro Truck Simulator 2/game.log.txt
 ```
 
-当前探针日志前缀：
+The current probe uses this log prefix:
 
 ```text
 [ets2-dispatch-rust]
 ```
 
-## 后续阶段
+## Later phases
 
-SDK 基座完成并稳定后，产品层再依次处理：
+After the SDK foundation is complete and stable, the product layer will proceed in this order:
 
-1. 本地 bridge 与 IPC；
-2. telemetry protocol；
-3. 浏览器/PWA 仪表盘；
-4. 调度、行程记录与本地数据库；
-5. 存档任务同步；
-6. 独立路线与地图能力。
+1. local bridge and IPC;
+2. telemetry protocol;
+3. browser/PWA dashboard;
+4. dispatch, trip history, and a local database;
+5. save-game job synchronization;
+6. independent routing and map capabilities.
 
-这些目录目前只是保留边界，不应反向把网络、数据库或产品状态塞回游戏进程内的 telemetry callback。
+These directories currently reserve architectural boundaries only. Network, database, and product state should not flow backward into telemetry callbacks inside the game process.
 
-## 许可证
+## License
 
-本项目自行编写的 Rust 代码使用 MIT License。
+Rust code authored for this project is licensed, at your option, under either of:
 
-`third-party/scs_sdk_1_14/` 来自 SCS Software，受其随 SDK 提供的独立授权文本约束。该文本允许使用、修改和分发，但要求在软件副本或实质性部分中保留 SCS Software 的版权与许可声明。第三方 SDK 文件的版权归属不应替换为本项目版权。
+- [Apache License, Version 2.0](LICENSE-APACHE);
+- [MIT License](LICENSE-MIT).
+
+`third-party/scs_sdk_1_14/` originates from SCS Software and is governed by the separate license text distributed with the SDK. That license permits use, modification, and distribution while requiring copies or substantial portions of the software to retain the SCS Software copyright and license notice.
