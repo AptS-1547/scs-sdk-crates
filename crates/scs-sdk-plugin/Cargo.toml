@@ -1,0 +1,18 @@
+[package]
+name = "scs-sdk-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Safe lifecycle and callback framework for SCS telemetry plugins"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+scs-sdk = { path = "../scs-sdk" }
+scs-sdk-plugin-macros = { path = "../scs-sdk-plugin-macros" }
+scs-sdk-sys = { path = "../scs-sdk-sys" }
+
+[lints]
+workspace = true

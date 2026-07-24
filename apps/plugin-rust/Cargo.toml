@@ -1,0 +1,18 @@
+[package]
+name = "ets2-dispatch-telemetry-rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Rust parity telemetry plugin for ETS2 Dispatch"
+
+[lib]
+name = "ets2_dispatch_telemetry_rust"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+scs-sdk-plugin = { path = "../../crates/scs-sdk-plugin" }
+
+[lints]
+workspace = true

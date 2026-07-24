@@ -1,0 +1,16 @@
+[package]
+name = "scs-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Typed Rust wrapper for the SCS Software telemetry SDK"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+scs-sdk-sys = { path = "../scs-sdk-sys" }
+
+[lints]
+workspace = true

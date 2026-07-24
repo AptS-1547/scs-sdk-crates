@@ -1,0 +1,215 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.cargo/**'
+      - '.github/workflows/rust.yml'
+      - 'apps/plugin-rust/**'
+      - 'crates/scs-sdk-sys/**'
+      - 'crates/scs-sdk/**'
+      - 'crates/scs-sdk-plugin/**'
+      - 'crates/scs-sdk-plugin-macros/**'
+      - 'scripts/**'
+      - 'third-party/scs_sdk_1_14/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '.cargo/**'
+      - '.github/workflows/rust.yml'
+      - 'apps/plugin-rust/**'
+      - 'crates/scs-sdk-sys/**'
+      - 'crates/scs-sdk/**'
+      - 'crates/scs-sdk-plugin/**'
+      - 'crates/scs-sdk-plugin-macros/**'
+      - 'scripts/**'
+      - 'third-party/scs_sdk_1_14/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+  workflow_dispatch:
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # A clean CI runner receives little benefit from incremental artifacts. They
+  # consume cache space and make target-specific caches substantially larger.
+  CARGO_INCREMENTAL: '0'
+  # Keep test binaries small enough for hosted runners without changing the
+  # repository's local development profile.
+  CARGO_PROFILE_TEST_CODEGEN_UNITS: '16'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
+jobs:
+  quality:
+    name: Format, Clippy, and boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality-v1
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check shell syntax
+        run: bash -n scripts/*.sh
+
+      - name: Check safe application boundary
+        run: scripts/check-plugin-boundary.sh
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  tests:
+    name: Workspace tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tests-v1
+
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+
+  miri:
+    name: Miri (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: scs-sdk
+            miri_flags: ''
+          - package: scs-sdk-plugin
+            miri_flags: -Zmiri-strict-provenance
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Pin Miri independently from the MSRV toolchain. The selected nightly is
+      # the version used for the current strict-provenance baseline.
+      - name: Setup pinned Miri toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-12
+          components: miri, rust-src
+
+      - name: Cache Miri build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: miri-${{ matrix.package }}-v1
+
+      - name: Run Miri
+        env:
+          MIRIFLAGS: ${{ matrix.miri_flags }}
+        run: cargo +nightly-2026-04-12 miri test --locked -p ${{ matrix.package }}
+
+  windows-plugin:
+    name: Windows x86-64 plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install MinGW-w64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-mingw-w64-x86-64 \
+            gcc-mingw-w64-x86-64
+
+      - name: Cache Windows build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-x86-64-v1
+
+      - name: Build and verify Windows plugin
+        run: scripts/build-windows-plugin.sh
+
+      - name: Upload Windows plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: ets2-dispatch-windows-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-pc-windows-gnu/release/ets2_dispatch_telemetry_rust.dll
+
+  linux-plugin:
+    name: Linux x86-64 plugin (glibc 2.17)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Setup pinned Zig toolchain
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install pinned cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild@0.23.0
+
+      - name: Cache Linux build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-x86-64-glibc-2.17-v1
+
+      - name: Build and verify Linux plugin
+        run: scripts/build-linux-plugin.sh
+
+      - name: Upload Linux plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: ets2-dispatch-linux-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-unknown-linux-gnu/release/libets2_dispatch_telemetry_rust.so

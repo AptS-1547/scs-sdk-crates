@@ -1,0 +1,357 @@
+use core::ffi::{CStr, c_void};
+use core::marker::PhantomData;
+
+use crate::{Event, SdkError, SdkResult, sys};
+
+/// An inert handle to the game's logger.
+///
+/// The handle can be stored as part of a plugin session, but it deliberately
+/// has no logging methods. Logging is only available through [`SdkCall`], which
+/// is scoped to one direct call from the game.
+#[derive(Clone, Copy)]
+pub(crate) struct LoggerHandle(sys::ScsLog);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum LogLevel {
+    Message = sys::SCS_LOG_TYPE_MESSAGE,
+    Warning = sys::SCS_LOG_TYPE_WARNING,
+    Error = sys::SCS_LOG_TYPE_ERROR,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ApiTable {
+    pub(crate) logger: LoggerHandle,
+    pub(crate) register_for_event: sys::ScsTelemetryRegisterForEvent,
+    pub(crate) unregister_from_event: sys::ScsTelemetryUnregisterFromEvent,
+    pub(crate) register_for_channel: sys::ScsTelemetryRegisterForChannel,
+    pub(crate) unregister_from_channel: sys::ScsTelemetryUnregisterFromChannel,
+}
+
+impl ApiTable {
+    const fn from_raw(raw: &sys::ScsTelemetryInitParamsV101) -> Self {
+        Self {
+            logger: LoggerHandle(raw.common.log),
+            register_for_event: raw.register_for_event,
+            unregister_from_event: raw.unregister_from_event,
+            register_for_channel: raw.register_for_channel,
+            unregister_from_channel: raw.unregister_from_channel,
+        }
+    }
+}
+
+/// A typed view over the initialization parameters supplied by SCS.
+pub struct TelemetryApi<'a> {
+    raw: &'a sys::ScsTelemetryInitParamsV101,
+    table: ApiTable,
+    // The SDK API is main-thread-only. Do not allow this view to cross threads.
+    not_send_sync: PhantomData<*mut ()>,
+}
+
+/// A copyable, inert session handle used by callbacks after initialization.
+///
+/// Calling [`TelemetrySession::with_call`] is unsafe because the caller must
+/// prove that the current stack is executing as a direct call from SCS on the
+/// game's main thread.
+///
+/// The scoped capability cannot be returned from the higher-ranked closure:
+///
+/// ```compile_fail
+/// use scs_sdk::{SdkCall, TelemetrySession};
+///
+/// fn leak(session: TelemetrySession) -> &'static SdkCall<'static> {
+///     unsafe { session.with_call(|call| call) }
+/// }
+/// ```
+#[derive(Clone, Copy)]
+pub struct TelemetrySession {
+    pub(crate) table: ApiTable,
+}
+
+/// Capabilities available during one direct call from the game.
+///
+/// The lifetime is higher-ranked by the constructors in this module, so a
+/// scope cannot be returned, stored, or moved into another thread by safe code.
+///
+/// `SdkCall` is deliberately neither `Send` nor `Sync`:
+///
+/// ```compile_fail
+/// use scs_sdk::SdkCall;
+///
+/// fn assert_send<T: Send>() {}
+/// fn assert_sync<T: Sync>() {}
+///
+/// assert_send::<SdkCall<'static>>();
+/// assert_sync::<SdkCall<'static>>();
+/// ```
+pub struct SdkCall<'scope> {
+    pub(crate) table: ApiTable,
+    scope: PhantomData<&'scope mut ()>,
+    not_send_sync: PhantomData<*mut ()>,
+}
+
+/// Logger access tied to the current [`SdkCall`] scope.
+#[derive(Clone, Copy)]
+pub struct ScopedLogger<'scope> {
+    raw: sys::ScsLog,
+    scope: PhantomData<&'scope SdkCall<'scope>>,
+}
+
+impl<'a> TelemetryApi<'a> {
+    /// Creates a typed view over the initialization parameters supplied by SCS.
+    ///
+    /// # Safety
+    ///
+    /// `params` must point to a live v1.00/v1.01 telemetry initialization
+    /// structure supplied by the game. The returned view may only be used
+    /// synchronously during the direct initialization call from SCS, on the
+    /// game's main thread. The pointed-to function table and strings must remain
+    /// valid for that use.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::InvalidParameter`] when `params` is null.
+    pub unsafe fn from_raw(params: *const sys::ScsTelemetryInitParams) -> SdkResult<Self> {
+        let raw = unsafe { params.cast::<sys::ScsTelemetryInitParamsV101>().as_ref() }
+            .ok_or(SdkError::InvalidParameter)?;
+        Ok(Self {
+            raw,
+            table: ApiTable::from_raw(raw),
+            not_send_sync: PhantomData,
+        })
+    }
+
+    #[must_use]
+    pub const fn raw(&self) -> &sys::ScsTelemetryInitParamsV101 {
+        self.raw
+    }
+
+    #[must_use]
+    pub fn game_name(&self) -> &'a CStr {
+        // SAFETY: SCS guarantees a non-null, NUL-terminated string for the
+        // duration of the initialization call.
+        unsafe { CStr::from_ptr(self.raw.common.game_name) }
+    }
+
+    #[must_use]
+    pub fn game_id(&self) -> &'a CStr {
+        // SAFETY: SCS guarantees a non-null, NUL-terminated string for the
+        // duration of the initialization call.
+        unsafe { CStr::from_ptr(self.raw.common.game_id) }
+    }
+
+    #[must_use]
+    pub const fn game_version(&self) -> sys::ScsU32 {
+        self.raw.common.game_version
+    }
+
+    /// Returns an inert session handle for later callback entry points.
+    #[must_use]
+    pub const fn session(&self) -> TelemetrySession {
+        TelemetrySession { table: self.table }
+    }
+
+    /// Executes an operation with the capabilities valid during initialization.
+    ///
+    /// The higher-ranked lifetime prevents the operation from returning or
+    /// storing the scoped capability.
+    pub fn with_call<R>(&self, operation: impl for<'scope> FnOnce(&SdkCall<'scope>) -> R) -> R {
+        let call = SdkCall {
+            table: self.table,
+            scope: PhantomData,
+            not_send_sync: PhantomData,
+        };
+        operation(&call)
+    }
+}
+
+impl TelemetrySession {
+    /// Executes an operation with the capabilities valid during a direct SCS
+    /// callback, initialization call, or shutdown call.
+    ///
+    /// # Safety
+    ///
+    /// The caller must be executing synchronously on the game's main thread as
+    /// a direct call from SCS, while the telemetry session is active. The
+    /// operation must not let the scoped capability escape its closure and must
+    /// not unwind across the SDK ABI boundary.
+    pub unsafe fn with_call<R>(
+        self,
+        operation: impl for<'scope> FnOnce(&SdkCall<'scope>) -> R,
+    ) -> R {
+        let call = SdkCall {
+            table: self.table,
+            scope: PhantomData,
+            not_send_sync: PhantomData,
+        };
+        operation(&call)
+    }
+}
+
+impl SdkCall<'_> {
+    #[must_use]
+    pub const fn logger(&self) -> ScopedLogger<'_> {
+        ScopedLogger {
+            raw: self.table.logger.0,
+            scope: PhantomData,
+        }
+    }
+
+    /// Registers an SDK event callback.
+    ///
+    /// # Safety
+    ///
+    /// `callback` must implement the exact SDK ABI, must uphold the validity
+    /// requirements for the event-specific `event_info` pointer, and must not
+    /// unwind across the ABI boundary. `context` must remain valid for every
+    /// callback invocation. This method must be called from initialization or
+    /// an SCS event callback other than the callback for `event`, never from a
+    /// worker thread or a channel callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns the result reported by the game's registration function.
+    pub unsafe fn register_event(
+        &self,
+        event: Event,
+        callback: sys::ScsTelemetryEventCallback,
+        context: *mut c_void,
+    ) -> SdkResult {
+        // SAFETY: The caller upholds the SDK callback and context contract.
+        let result = unsafe { (self.table.register_for_event)(event as u32, callback, context) };
+        SdkError::from_code(result)
+    }
+
+    /// Unregisters an SDK event callback.
+    ///
+    /// # Safety
+    ///
+    /// Must be called from initialization, shutdown, or an SCS event callback.
+    /// Context storage associated with the old registration must remain alive
+    /// until this function succeeds and no invocation of that callback is active.
+    ///
+    /// # Errors
+    ///
+    /// Returns the result reported by the game's unregistration function.
+    pub unsafe fn unregister_event(&self, event: Event) -> SdkResult {
+        // SAFETY: The caller upholds the SDK call-site restriction.
+        let result = unsafe { (self.table.unregister_from_event)(event as u32) };
+        SdkError::from_code(result)
+    }
+}
+
+impl ScopedLogger<'_> {
+    pub fn log(self, level: LogLevel, message: &CStr) {
+        // SAFETY: The scope proves that this call is made during a direct SDK
+        // invocation, and the C string remains alive for the duration of it.
+        unsafe { (self.raw)(level as sys::ScsLogType, message.as_ptr()) };
+    }
+
+    pub fn message(self, message: &CStr) {
+        self.log(LogLevel::Message, message);
+    }
+
+    pub fn warning(self, message: &CStr) {
+        self.log(LogLevel::Warning, message);
+    }
+
+    pub fn error(self, message: &CStr) {
+        self.log(LogLevel::Error, message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::ffi::c_void;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    static LOG_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static EVENT_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "system" fn fake_log(_level: sys::ScsLogType, _message: sys::ScsString) {
+        LOG_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "system" fn fake_event_callback(
+        _event: sys::ScsEvent,
+        _event_info: *const c_void,
+        _context: sys::ScsContext,
+    ) {
+    }
+
+    unsafe extern "system" fn fake_register_event(
+        _event: sys::ScsEvent,
+        _callback: sys::ScsTelemetryEventCallback,
+        _context: sys::ScsContext,
+    ) -> sys::ScsResult {
+        EVENT_REGISTRATIONS.fetch_add(1, Ordering::Relaxed);
+        sys::SCS_RESULT_OK
+    }
+
+    unsafe extern "system" fn fake_unregister_event(_event: sys::ScsEvent) -> sys::ScsResult {
+        sys::SCS_RESULT_OK
+    }
+
+    unsafe extern "system" fn fake_register_channel(
+        _name: sys::ScsString,
+        _index: sys::ScsU32,
+        _type: sys::ScsValueType,
+        _flags: sys::ScsU32,
+        _callback: sys::ScsTelemetryChannelCallback,
+        _context: sys::ScsContext,
+    ) -> sys::ScsResult {
+        sys::SCS_RESULT_OK
+    }
+
+    unsafe extern "system" fn fake_unregister_channel(
+        _name: sys::ScsString,
+        _index: sys::ScsU32,
+        _type: sys::ScsValueType,
+    ) -> sys::ScsResult {
+        sys::SCS_RESULT_OK
+    }
+
+    fn parameters() -> sys::ScsTelemetryInitParamsV101 {
+        sys::ScsTelemetryInitParamsV101 {
+            common: sys::ScsSdkInitParamsV100 {
+                game_name: c"Euro Truck Simulator 2".as_ptr(),
+                game_id: c"eut2".as_ptr(),
+                game_version: 0x0001_003c,
+                padding: sys::ScsPadding::uninit(),
+                log: fake_log,
+            },
+            register_for_event: fake_register_event,
+            unregister_from_event: fake_unregister_event,
+            register_for_channel: fake_register_channel,
+            unregister_from_channel: fake_unregister_channel,
+        }
+    }
+
+    #[test]
+    fn logging_and_registration_require_a_scoped_call() {
+        LOG_CALLS.store(0, Ordering::Relaxed);
+        EVENT_REGISTRATIONS.store(0, Ordering::Relaxed);
+        let parameters = parameters();
+        let pointer = (&raw const parameters).cast::<sys::ScsTelemetryInitParams>();
+        let api = unsafe { TelemetryApi::from_raw(pointer) }.expect("valid function table");
+
+        assert_eq!(api.game_id(), c"eut2");
+        api.with_call(|call| {
+            call.logger().message(c"initializing");
+            unsafe {
+                call.register_event(Event::Started, fake_event_callback, core::ptr::null_mut())
+            }
+            .expect("event registration");
+        });
+
+        let session = api.session();
+        unsafe {
+            session.with_call(|call| call.logger().message(c"callback"));
+        }
+
+        assert_eq!(LOG_CALLS.load(Ordering::Relaxed), 2);
+        assert_eq!(EVENT_REGISTRATIONS.load(Ordering::Relaxed), 1);
+    }
+}

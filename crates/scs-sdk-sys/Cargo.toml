@@ -1,0 +1,13 @@
+[package]
+name = "scs-sdk-sys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Raw x86-64 ABI bindings for the SCS Software telemetry SDK"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
