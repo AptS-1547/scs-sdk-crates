@@ -1,0 +1,23 @@
+# Rust
+/target/
+/build/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+.DS_Store
+
+# Local runtime data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+
+# ETS2 telemetry and save-game data must stay outside the repository.
+/local-data/
+/save-backups/
+
+# Local Temp files
+/tmp
