@@ -2,7 +2,13 @@
 
 set -euo pipefail
 
-plugin_path="${1:?usage: verify-macos-plugin.sh PATH_TO_DYLIB}"
+plugin_path="${1:?usage: verify-macos-plugin.sh PATH_TO_DYLIB [EXPECTED_EXPORT ...]}"
+shift
+if [[ $# -eq 0 ]]; then
+  expected_symbols=(scs_telemetry_init scs_telemetry_shutdown)
+else
+  expected_symbols=("$@")
+fi
 
 if [[ ! -f "$plugin_path" ]]; then
   printf 'Plugin does not exist: %s\n' "$plugin_path" >&2
@@ -37,7 +43,10 @@ fi
 # information. `NM` remains configurable for nonstandard Xcode installations.
 nm_bin="${NM:-nm}"
 defined_external_symbols="$($nm_bin -gjU "$plugin_path" | LC_ALL=C sort)"
-for symbol in _scs_telemetry_init _scs_telemetry_shutdown; do
+expected_external_symbols_array=()
+for symbol in "${expected_symbols[@]}"; do
+  symbol="_$symbol"
+  expected_external_symbols_array+=("$symbol")
   if [[ $'\n'"$defined_external_symbols"$'\n' != *$'\n'"$symbol"$'\n'* ]]; then
     printf 'Missing required external export: %s\n' "${symbol#_}" >&2
     exit 1
@@ -45,14 +54,15 @@ for symbol in _scs_telemetry_init _scs_telemetry_shutdown; do
 done
 
 
-# The leading underscore is Mach-O's C-symbol spelling; after accounting for
-# it, the ABI remains the same closed two-function surface as PE and ELF.
+# The leading underscore is Mach-O's C-symbol spelling. The expected set still
+# remains closed after translating every caller-supplied C symbol.
 expected_external_symbols="$(
-  printf '%s\n' _scs_telemetry_init _scs_telemetry_shutdown | LC_ALL=C sort
+  printf '%s\n' "${expected_external_symbols_array[@]}" | LC_ALL=C sort
 )"
 if [[ "$defined_external_symbols" != "$expected_external_symbols" ]]; then
   printf 'Unexpected defined external exports:\n%s\n' "$defined_external_symbols" >&2
   exit 1
 fi
 
-printf 'Verified macOS x86-64 telemetry plugin: %s\n' "$plugin_path"
+printf 'Verified macOS x86-64 plugin with %d exports: %s\n' \
+  "${#expected_symbols[@]}" "$plugin_path"

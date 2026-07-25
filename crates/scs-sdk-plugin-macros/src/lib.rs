@@ -1,4 +1,4 @@
-//! Procedural exports for the SCS telemetry plugin ABI.
+//! Procedural exports for the SCS telemetry and input plugin ABIs.
 //!
 //! The generated functions are intentionally kept out of application crates:
 //! all raw pointers, calling-convention declarations, symbol attributes, and
@@ -137,6 +137,64 @@ pub fn export_plugin(input: TokenStream) -> TokenStream {
         #[unsafe(no_mangle)]
         pub extern "system" fn scs_telemetry_shutdown() {
             __SCS_SDK_PLUGIN_RUNTIME.shutdown();
+        }
+    }
+    .into()
+}
+
+/// Generates the two loader-visible symbols for one SCS input plugin.
+///
+/// The constructor expression is evaluated once for each accepted input
+/// initialization attempt and must produce a value implementing
+/// `scs_sdk_plugin::InputPlugin`. The expansion owns an independent input
+/// runtime and emits exactly `scs_input_init` and `scs_input_shutdown`.
+///
+/// This macro may coexist with `export_plugin` in one dynamic library because
+/// the input and telemetry runtimes and exported symbol names are distinct.
+/// Application source remains safe; raw pointers and ABI declarations are
+/// generated only at the audited framework boundary.
+#[proc_macro]
+pub fn export_input_plugin(input: TokenStream) -> TokenStream {
+    let constructor = parse_macro_input!(input as Expr);
+
+    quote! {
+        // Input callbacks retain the opaque device context after initialization.
+        // The runtime therefore needs a stable process-lifetime root, separate
+        // from the telemetry runtime used by export_plugin!.
+        static __SCS_SDK_INPUT_PLUGIN_RUNTIME: ::scs_sdk_plugin::__private::InputRuntime =
+            ::scs_sdk_plugin::__private::InputRuntime::new();
+
+        #[doc = "Initializes the input plugin through the safe scs-sdk-plugin runtime."]
+        #[doc = ""]
+        #[doc = "# Safety"]
+        #[doc = ""]
+        #[doc = "The game must pass the live input initialization structure matching"]
+        #[doc = "version and obey the SCS Input SDK main-thread lifecycle contract."]
+        #[unsafe(no_mangle)]
+        pub unsafe extern "system" fn scs_input_init(
+            version: ::scs_sdk_plugin::__private::ScsU32,
+            params: *const ::scs_sdk_plugin::__private::ScsInputInitParams,
+        ) -> ::scs_sdk_plugin::__private::ScsResult {
+            // SAFETY: This is the loader-facing input ABI boundary. The caller
+            // provides the matching live initialization layout and serialized
+            // main-thread invocation. InputRuntime contains every Rust panic
+            // and keeps registered callback contexts at stable addresses.
+            unsafe {
+                __SCS_SDK_INPUT_PLUGIN_RUNTIME.initialize(version, params, || {
+                    // The expected Box<dyn InputPlugin> return type makes an
+                    // invalid constructor fail during compilation.
+                    ::std::boxed::Box::new(#constructor)
+                })
+            }
+        }
+
+        #[doc = "Stops the active input plugin after SCS unregisters its devices."]
+        #[doc = ""]
+        #[doc = "The framework invokes the product shutdown hook and releases the"]
+        #[doc = "successful generation's callback contexts."]
+        #[unsafe(no_mangle)]
+        pub extern "system" fn scs_input_shutdown() {
+            __SCS_SDK_INPUT_PLUGIN_RUNTIME.shutdown();
         }
     }
     .into()

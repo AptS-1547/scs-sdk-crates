@@ -2,7 +2,7 @@
 
 **中文** | [English](README.md)
 
-`scs-sdk-plugin` 是 native SCS telemetry 插件的安全应用 framework 与 audited
+`scs-sdk-plugin` 是 native SCS telemetry 与 input-device 插件的安全应用 framework 与 audited
 runtime 边界。它把 typed [`scs-sdk`](../scs-sdk/) 与生命周期管理、事务式注册、
 callback dispatch、panic containment 和稳定 foreign context ownership 组合起来，
 让普通插件源码保持 safe Rust。
@@ -11,13 +11,12 @@ callback dispatch、panic containment 和稳定 foreign context ownership 组合
 
 ```rust
 pub use scs_sdk as sdk;
-pub use scs_sdk_plugin_macros::export_plugin;
+pub use scs_sdk_plugin_macros::{export_input_plugin, export_plugin};
 ```
 
 产品插件通常只需要在 manifest 中依赖 `scs-sdk-plugin`。
 
-> Framework 覆盖公共 **SCS Telemetry SDK 1.14** 接口。SDK 中的 input-device
-> API 目前尚未由本 workspace 实现。
+> Framework 为 Telemetry API 1.00/1.01 与 Input API 1.00 提供彼此独立的安全 runtime。
 
 本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
 
@@ -35,6 +34,13 @@ pub use scs_sdk_plugin_macros::export_plugin;
 runtime 负责 ABI entry point 与 foreign callback plumbing。应用源码不需要原始指针、
 C 字符串、手写 `extern` 函数、raw SCS union、直接访问 `scs-sdk-sys` 或使用
 `unsafe` block。
+
+Input 应用实现 `InputPlugin`，通过
+`InputPluginContext::register_device` 显式声明每个 device，并在
+`next_input_event` 返回 typed `InputEvent`。Activity notification 需要在
+每个 `InputDeviceSpec` 上显式启用。Input runtime 会验证名称、device-local
+index、注册 bool/float type、panic containment、generation isolation，以及官方
+规定的 shutdown 前自动注销生命周期。
 
 ## 最小安全插件
 
@@ -141,6 +147,10 @@ SDK 字符串不会被静默折叠为某个已知值。
 `TelemetryEventKind` 是 `scs_sdk::Event` 的 re-export，不是重复的 event catalog。
 registration identity 与 callback payload 因而保持不同类型，又无需维护两套 raw
 discriminator mapping。
+
+Input callback 使用 `InputValue::Float(InputAxisValue)` 返回 float axis。
+Framework 会 re-export `InputAxisValue`，在 application 边界显式落实 finite、-1.0 至
+1.0 闭区间契约；任意 raw float 不会通过 safe plugin 代码进入 runtime。
 
 ## Runtime 保证
 

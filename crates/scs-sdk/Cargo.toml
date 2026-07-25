@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Typed Rust wrapper for the SCS Software telemetry SDK"
+description = "Typed Rust wrapper for the SCS Software Telemetry and Input SDKs"
 
 [lib]
 path = "src/lib.rs"

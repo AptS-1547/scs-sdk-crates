@@ -7,6 +7,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # With no explicit path, audit every handwritten application example. Calls
 # from isolated fixtures still pass one directory and reuse the same rules.
 if [[ $# -eq 0 ]]; then
+  "$0" "$repo_root/examples/input-plugin"
   "$0" "$repo_root/examples/telemetry-plugin"
   "$0" "$repo_root/examples/telemetry-fallback-plugin"
   exit 0

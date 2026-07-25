@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Safe lifecycle and callback framework for SCS telemetry plugins"
+description = "Safe lifecycle and callback framework for SCS Telemetry and Input plugins"
 
 [lib]
 path = "src/lib.rs"

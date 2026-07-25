@@ -7,6 +7,7 @@ fixture_root="$repo_root/crates/scs-sdk-plugin/tests/fixtures/export-plugin"
 manifest="$fixture_root/Cargo.toml"
 target_dir="$repo_root/target/plugin-macro-fixtures/check"
 diagnostics="$target_dir/missing-trait.stderr"
+input_diagnostics="$target_dir/input-missing-trait.stderr"
 
 # The fixture workspace is intentionally excluded from the repository's main
 # workspace, so root-level fmt/clippy/test commands do not discover it. Run its
@@ -23,6 +24,9 @@ cargo fmt \
 # syntax, C strings, pointers, or scs-sdk-sys.
 "$repo_root/scripts/check-plugin-boundary.sh" "$fixture_root/pass"
 "$repo_root/scripts/check-plugin-boundary.sh" "$fixture_root/missing-trait"
+"$repo_root/scripts/check-plugin-boundary.sh" "$fixture_root/input-pass"
+"$repo_root/scripts/check-plugin-boundary.sh" "$fixture_root/input-missing-trait"
+"$repo_root/scripts/check-plugin-boundary.sh" "$fixture_root/combined-pass"
 
 # Compile and lint the successful consumer in isolation. `--locked` makes its
 # dedicated Cargo.lock part of the fixture contract rather than silently
@@ -36,6 +40,36 @@ cargo check \
 cargo clippy \
   --manifest-path "$manifest" \
   --package scs-sdk-plugin-export-fixture \
+  --target-dir "$target_dir" \
+  --locked \
+  --all-targets \
+  -- \
+  -D warnings
+
+cargo check \
+  --manifest-path "$manifest" \
+  --package scs-sdk-input-plugin-export-fixture \
+  --target-dir "$target_dir" \
+  --locked
+
+cargo clippy \
+  --manifest-path "$manifest" \
+  --package scs-sdk-input-plugin-export-fixture \
+  --target-dir "$target_dir" \
+  --locked \
+  --all-targets \
+  -- \
+  -D warnings
+
+cargo check \
+  --manifest-path "$manifest" \
+  --package scs-sdk-combined-plugin-export-fixture \
+  --target-dir "$target_dir" \
+  --locked
+
+cargo clippy \
+  --manifest-path "$manifest" \
+  --package scs-sdk-combined-plugin-export-fixture \
   --target-dir "$target_dir" \
   --locked \
   --all-targets \
@@ -84,4 +118,36 @@ require_diagnostic() {
 require_diagnostic 'error\[E0277\]'
 require_diagnostic 'trait bound .*TelemetryPlugin.*not satisfied'
 
-printf '%s\n' 'Verified plugin macro compile-pass and missing-trait fixtures.'
+if CARGO_TERM_COLOR=never cargo check \
+  --manifest-path "$manifest" \
+  --package scs-sdk-input-plugin-missing-trait-fixture \
+  --target-dir "$target_dir" \
+  --locked \
+  >"$input_diagnostics" 2>&1; then
+  printf '%s\n' 'Input missing-trait fixture unexpectedly compiled successfully.' >&2
+  exit 1
+fi
+
+require_input_diagnostic() {
+  local pattern="$1"
+  local status
+
+  if grep -Eq "$pattern" "$input_diagnostics"; then
+    return
+  else
+    status=$?
+  fi
+
+  if [[ $status -eq 1 ]]; then
+    printf '%s\n' 'Input missing-trait fixture failed for an unexpected reason:' >&2
+  else
+    printf 'Failed to inspect input fixture diagnostics with grep (status %d).\n' "$status" >&2
+  fi
+  cat "$input_diagnostics" >&2
+  exit 1
+}
+
+require_input_diagnostic 'error\[E0277\]'
+require_input_diagnostic 'trait bound .*InputPlugin.*not satisfied'
+
+printf '%s\n' 'Verified telemetry, input, and combined plugin macro fixtures.'

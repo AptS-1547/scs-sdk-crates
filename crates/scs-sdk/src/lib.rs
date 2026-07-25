@@ -21,6 +21,7 @@ mod event;
 pub mod game;
 pub mod gameplay;
 mod index;
+pub mod input;
 mod value;
 mod version;
 
@@ -40,5 +41,6 @@ pub use value::{
     ValueRef, ValueType,
 };
 pub use version::{GameSchemaVersion, TelemetryApiVersion};
+pub use version::{InputApiVersion, InputGameVersion};
 
 pub use scs_sdk_sys as sys;

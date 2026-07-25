@@ -1,0 +1,16 @@
+[package]
+name = "scs-sdk-input-plugin-missing-trait-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Compile-fail fixture for a missing InputPlugin implementation"
+
+[lib]
+name = "scs_sdk_input_plugin_missing_trait_fixture"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+scs-sdk-plugin.workspace = true

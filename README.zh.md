@@ -2,24 +2,25 @@
 
 # SCS SDK Rust Crates
 
-**用安全、强类型的 Rust 构建原生 SCS telemetry 插件。**
+**用安全、强类型的 Rust 构建原生 SCS telemetry 与 input-device 插件。**
 
-完整覆盖 Telemetry SDK 1.14 · 审计过的 FFI 与生命周期边界 · 已验证 Windows、Linux 与 macOS 产物
+完整覆盖 SDK 1.14 的公开 Telemetry 与 Input 接口 · 审计过的 FFI 与生命周期边界 · 已验证三平台产物
 
 [English](README.md) · **简体中文**
 
 </div>
 
-`scs-sdk-crates` 是面向公开 **SCS Telemetry SDK 1.14** 接口的可复用
-Rust 基座。它把官方 C ABI 转化为强类型 `no_std` binding，在其上提供安全的
-plugin runtime，并通过一个真实 ETS2 插件验证应用边界和最终原生产物。
+`scs-sdk-crates` 是面向 **SCS SDK 1.14** 公开 telemetry 与 input-device
+接口的可复用 Rust 基座。它把官方 C ABI 转化为强类型 `no_std` binding，
+提供彼此独立的安全 plugin runtime，并通过真实示例验证应用边界和最终产物。
 
 整个 workspace 由纯 Rust 实现。插件作者无需引入 C/C++ shim、CMake、bindgen、
 裸指针、手写导出符号或应用层 `unsafe`。
 
 > [!IMPORTANT]
-> 本仓库完整覆盖的是 SCS SDK 1.14 的公开 **telemetry** 接口，而不是整个 SCS
-> SDK。input-device API 位于当前实现范围之外。
+> 本仓库完整覆盖 SCS SDK 1.14 中的公开 **Telemetry API 1.00/1.01** 与
+> **Input API 1.00**。覆盖声明严格限定在这些已审计接口，不外推到未来尚未出现
+> 的 SDK surface。
 
 > [!NOTE]
 > 这是独立的社区项目，与 SCS Software 不存在隶属或背书关系。
@@ -31,9 +32,9 @@ plugin runtime，并通过一个真实 ETS2 插件验证应用边界和最终原
 | 需求 | 本仓库提供的能力 |
 | --- | --- |
 | 可审计的 SDK 覆盖 | 按 header 顺序保存 raw catalog 与 typed catalog，覆盖全部 107 个 channel、6 个 configuration ID、60 个 configuration attribute、6 个 gameplay event 与 15 个 gameplay attribute。 |
-| 安全的应用代码 | `TelemetryPlugin` API 提供 typed channel、event、value、index、game identity 与 compatibility 声明。 |
-| 统一的 runtime 正确性 | 事务式注册、逆序回滚与关闭、panic containment、稳定 callback context、poison recovery 和 stale-callback isolation。 |
-| 可信的产物验证 | Release 脚本会在链接与符号裁剪后检查 PE、ELF、Mach-O 格式、x86-64 架构以及精确的两个 SCS loader export。 |
+| 安全的应用代码 | 独立的 `TelemetryPlugin` 与 `InputPlugin` API 提供 typed value、index、game identity、compatibility 与显式 registration。 |
+| 统一的 runtime 正确性 | Telemetry 事务与 Input device lifetime、panic containment、稳定 callback context、poison recovery 和 stale-callback isolation。 |
+| 可信的产物验证 | Release 脚本会在链接与符号裁剪后检查 PE、ELF、Mach-O、x86-64 架构以及精确的 API-specific export set。 |
 | 真实游戏证据 | 安全示例在 ETS2 中接收 6 类 event 与 8 个 channel；独立 probe 验证 loader 文档规定的 API fallback 顺序。 |
 
 它刻意只做基座，而不是产品插件。Web bridge、调度逻辑、持久化、存档处理与用户
@@ -94,8 +95,9 @@ scs_telemetry_init
 scs_telemetry_shutdown
 ```
 
-接下来可以阅读 [safe plugin framework 指南](crates/scs-sdk-plugin/)或
-[真实 telemetry example](examples/telemetry-plugin/)。
+接下来可以阅读 [safe plugin framework 指南](crates/scs-sdk-plugin/)、
+[真实 telemetry example](examples/telemetry-plugin/)或
+[input-device example](examples/input-plugin/)。
 
 ## 先看证据，再看承诺
 
@@ -139,7 +141,8 @@ scs-sdk                 no_std value、descriptor、catalog、decoding
         ▼
 scs-sdk-sys             no_std x86-64 C ABI definitions
 
-scs-sdk-plugin-macros   生成两个导出的 loader entry point
+examples/input-plugin 通过独立 InputPlugin runtime 使用相同分层。
+scs-sdk-plugin-macros 为每个选定 API 生成对应的两个 export。
 ```
 
 | 层 | 负责 | 不负责 |
@@ -147,8 +150,9 @@ scs-sdk-plugin-macros   生成两个导出的 loader entry point
 | [`scs-sdk-sys`](crates/scs-sdk-sys/) | Raw function pointer、union、structure、constant、catalog、layout assertion 与 ABI 所需的 `unsafe`。 | Typed application policy 或 plugin lifecycle。 |
 | [`scs-sdk`](crates/scs-sdk/) | Typed value 与 descriptor、版本域、catalog enumeration、tagged-union decoding，以及 callback scope 内对 SCS 的调用。 | 全局 runtime state、product state 或导出符号。 |
 | [`scs-sdk-plugin`](crates/scs-sdk-plugin/) | 安全的 plugin lifecycle、显式 registration、compatibility check、callback dispatch、rollback、shutdown 与 foreign-context ownership。 | 网络、存储、调度、UI 或存档功能。 |
-| [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | 把一个安全构造表达式展开成两个 SCS loader export。 | Runtime policy 或应用 ABI surface。 |
+| [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | 把安全构造表达式展开成 telemetry 和/或 input loader export。 | Runtime policy 或产品行为。 |
 | [`examples/telemetry-plugin`](examples/telemetry-plugin/) | 真实的安全插件与端到端边界 fixture。 | 产品功能。 |
+| [`examples/input-plugin`](examples/input-plugin/) | 使用 typed bool/float event 的安全 generic input device。 | 硬件集成或产品功能。 |
 
 Cargo 依赖方向保持为：
 
@@ -182,6 +186,26 @@ ETS2/ATS telemetry game-version constant。
 Typed access 不会丢失未来数据。已知的 enum-like string 具有包含 `ALL`、`COUNT`、
 `as_str`、`FromStr` 和 schema availability 的闭合集合；generic string access 仍会
 原样保留未来的未知值。
+
+## Input SDK 1.00 的强类型覆盖
+
+Input 是独立 API surface，不会被硬塞进 `TelemetryPlugin`：
+
+| Surface | 覆盖 |
+| --- | --- |
+| API version | Input API 1.00，以及彼此独立的 ETS2/ATS input game version |
+| Device class | Generic 与 semantical |
+| Device shape | 显式声明 1 至 400 个 bool/float input |
+| Callback flag | First in frame、first after activation，并保留未知 bit |
+| Lifecycle | 仅 init 可注册、可选 activity callback、重复 next-event poll、shutdown 前由 SCS 自动注销 |
+| Export | `scs_input_init` 与 `scs_input_shutdown` |
+
+`InputIndex`、`InputDeviceId`、`InputAxisValue`、`InputValue` 与
+`InputEventFlags` 保持 callback domain 显式。`InputAxisValue` 只接受 -1.0 至 1.0
+闭区间内的 finite normalized position；无效值会被拒绝，而不是静默 clamp。Runtime
+会验证 device/input 名称、device-local index、注册 value type、panic containment，
+以及部分初始化失败后保留的 stale context。安全示例与隔离宏 fixture 的应用源码均不含
+`unsafe`。
 
 ## 所有契约都保持显式
 
@@ -232,8 +256,11 @@ ownership model 通过 Miri strict provenance 验证。
 | 平台 | Target 与兼容性 | 命令 | 产物 |
 | --- | --- | --- | --- |
 | Windows | x86-64 GNU | `scripts/build-windows-plugin.sh` | `scs_sdk_telemetry_example.dll` |
+| Windows Input | x86-64 GNU | `scripts/build-windows-input-plugin.sh` | `scs_sdk_input_example.dll` |
 | Linux | x86-64，通过 Zig 保持 glibc 2.17 下限 | `scripts/build-linux-plugin.sh` | `libscs_sdk_telemetry_example.so` |
+| Linux Input | x86-64，通过 Zig 保持 glibc 2.17 下限 | `scripts/build-linux-input-plugin.sh` | `libscs_sdk_input_example.so` |
 | macOS | x86-64；Apple Silicon 上通过 Rosetta | `scripts/build-macos-plugin.sh` | `libscs_sdk_telemetry_example.dylib` |
+| macOS Input | x86-64；Apple Silicon 上通过 Rosetta | `scripts/build-macos-input-plugin.sh` | `libscs_sdk_input_example.dylib` |
 
 验证内容包括原生文件格式、x86-64 架构以及精确的 dynamic export 集合。macOS
 build 还会为本地加载应用并验证 ad-hoc signature；这不等于 Developer ID signing
@@ -249,6 +276,7 @@ crates/scs-sdk-sys/             raw no_std x86-64 ABI
 crates/scs-sdk/                 safe no_std typed wrapper 与 catalog
 crates/scs-sdk-plugin/          safe lifecycle/runtime/framework
 crates/scs-sdk-plugin-macros/   exported-entry-point proc macro
+examples/input-plugin/          安全的 generic input-device plugin
 examples/telemetry-plugin/      真实的 safe application-boundary plugin
 examples/telemetry-fallback-plugin/
                                 手动 loader fallback E2E probe
@@ -261,6 +289,7 @@ third-party/scs_sdk_history/    官方 SDK 1.0–1.14 历史与声明
 | --- | --- |
 | [`scs-sdk-plugin`](crates/scs-sdk-plugin/README.zh.md) | 编写安全插件并理解 lifecycle guarantee。 |
 | [Telemetry example](examples/telemetry-plugin/README.zh.md) | 查看显式订阅、typed callback、build artifact 与真实 ETS2 验证。 |
+| [Input example](examples/input-plugin/README.zh.md) | 查看显式 device registration 与 frame-scoped bool/float event generation。 |
 | [`scs-sdk`](crates/scs-sdk/README.zh.md) | Typed descriptor、value、index、version、schema history 与 decoding。 |
 | [`scs-sdk-sys`](crates/scs-sdk-sys/README.zh.md) | 审计 raw ABI 与官方 header mapping。 |
 | [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/README.zh.md) | 检查 exported-entry-point contract 与独立 consumer fixture。 |
@@ -270,8 +299,9 @@ third-party/scs_sdk_history/    官方 SDK 1.0–1.14 历史与声明
 
 Workspace 固定使用 Rust `1.85.0`，并把 formatting/boundary check、workspace test、
 Miri 与三个平台的 artifact build 保持为独立 CI gate。独立 proc-macro consumer
-fixture 必须能编译为真实 `cdylib`，在 release linking 后保留两个 export；缺少
-`TelemetryPlugin` 实现时则必须产生预期的 trait-bound diagnostic。
+fixture 必须能编译为真实 `cdylib`，在 release linking 后保留精确的
+telemetry/input export set，并验证 combined 四导出产物；缺少任一 plugin trait
+时都必须产生预期的 trait-bound diagnostic。
 
 <details>
 <summary><strong>运行完整的本地 foundation gate</strong></summary>

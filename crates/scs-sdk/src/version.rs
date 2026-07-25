@@ -69,6 +69,93 @@ impl fmt::Display for TelemetryApiVersion {
     }
 }
 
+/// Version of the ABI negotiated through `scs_input_init`.
+///
+/// This is intentionally separate from [`TelemetryApiVersion`]. SCS negotiates
+/// each API independently and the current SDK declares only input API 1.00.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputApiVersion(u32);
+
+impl InputApiVersion {
+    /// Initial input-device API layout introduced by SCS SDK 1.14.
+    pub const V1_00: Self = Self(sys::SCS_INPUT_VERSION_1_00);
+
+    /// Latest input API declared by the vendored SCS SDK headers.
+    pub const CURRENT: Self = Self(sys::SCS_INPUT_VERSION_CURRENT);
+
+    #[must_use]
+    pub const fn new(major: u32, minor: u32) -> Self {
+        Self(sys::make_version(major, minor))
+    }
+
+    #[must_use]
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn major(self) -> u32 {
+        sys::version_major(self.0)
+    }
+
+    #[must_use]
+    pub const fn minor(self) -> u32 {
+        sys::version_minor(self.0)
+    }
+}
+
+impl fmt::Display for InputApiVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{}", self.major(), self.minor())
+    }
+}
+
+/// Game-specific version supplied while initializing the input API.
+///
+/// SDK 1.14 declares input game version 1.00 for both ETS2 and ATS. This type
+/// remains distinct from telemetry [`GameSchemaVersion`] because SCS versions
+/// each API's game-facing contract independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputGameVersion(u32);
+
+impl InputGameVersion {
+    #[must_use]
+    pub const fn new(major: u32, minor: u32) -> Self {
+        Self(sys::make_version(major, minor))
+    }
+
+    #[must_use]
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn major(self) -> u32 {
+        sys::version_major(self.0)
+    }
+
+    #[must_use]
+    pub const fn minor(self) -> u32 {
+        sys::version_minor(self.0)
+    }
+}
+
+impl fmt::Display for InputGameVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{}", self.major(), self.minor())
+    }
+}
+
 /// Game-specific telemetry schema version from the initialization parameters.
 ///
 /// This is separate from both [`TelemetryApiVersion`] and the public game patch
@@ -141,5 +228,12 @@ mod tests {
         assert_eq!(schema.minor(), 19);
         assert_eq!(GameSchemaVersion::from_raw(schema.raw()), schema);
         assert_eq!(schema.to_string(), "1.19");
+    }
+
+    #[test]
+    fn input_versions_are_independent_from_telemetry_versions() {
+        assert_eq!(InputApiVersion::CURRENT, InputApiVersion::V1_00);
+        assert_eq!(InputApiVersion::V1_00.raw(), sys::make_version(1, 0));
+        assert_eq!(InputGameVersion::new(1, 0).to_string(), "1.0");
     }
 }

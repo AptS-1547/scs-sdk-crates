@@ -10,9 +10,10 @@ existing patterns unless there is a concrete correctness reason to change them.
   Dispatch product repository.
 - Product plugins, web applications, bridges, dispatch logic, save-game logic,
   and other end-user features belong in separate repositories.
-- The current implemented scope is complete coverage of the public SCS
-  Telemetry SDK 1.14 interface. Do not describe the whole SCS SDK as covered:
-  the input-device API is possible future scope and is not implemented yet.
+- The current implemented scope is complete coverage of the public SCS SDK 1.14
+  Telemetry interface and the independently versioned Input API 1.00 interface.
+  Keep those two lifecycle and version domains distinct; do not imply coverage
+  of private game internals or future SCS interfaces.
 - The official SDK files in third-party/scs_sdk_1_14/ are the ABI and constant
   source of truth. Do not derive contracts from third-party Rust crates or
   existing product behavior when the official headers answer the question.
@@ -27,12 +28,12 @@ The reusable workspace consists of these layers:
             |
     scs-sdk                 safe no_std typed SDK wrapper and catalogs
             |
-    scs-sdk-plugin          safe plugin lifecycle/runtime/framework
+    scs-sdk-plugin          safe Telemetry and Input lifecycle/runtime/framework
             |
-    scs-sdk-plugin-macros   exported-entry-point proc macro
+    scs-sdk-plugin-macros   Telemetry and Input entry-point proc macros
             |
-    examples/telemetry-plugin
-                            real safe application-boundary example
+    examples/telemetry-plugin and examples/input-plugin
+                            real safe application-boundary examples
 
 Dependency and ownership rules:
 
@@ -40,20 +41,25 @@ Dependency and ownership rules:
   pointers, and carefully justified unsafe are expected only because this is the
   raw layer. Keep it dependency-free and no_std.
 - scs-sdk owns typed values, descriptors, catalogs, version types, decoding,
-  and scoped calls back into the game. Keep it no_std. It must not own plugin
-  lifecycle or product state.
-- scs-sdk-plugin owns lifecycle state, registration transactions, callbacks,
-  panic containment, context lifetime, rollback, shutdown, and stale-callback
-  isolation. Product crates must not reimplement these mechanisms.
-- scs-sdk-plugin-macros generates the two SCS loader entry points. Macro
-  expansions must reference the public framework contract and must not require
-  application authors to handle ABI details.
+  and scoped Telemetry and Input calls back into the game. Keep it no_std. It
+  must not own plugin lifecycle or product state.
+- scs-sdk-plugin owns both lifecycle runtimes, registration transactions,
+  callbacks, panic containment, context lifetime, rollback or conservative
+  retirement, shutdown, and stale-callback isolation. Product crates must not
+  reimplement these mechanisms.
+- scs-sdk-plugin-macros generates the two Telemetry loader entry points or the
+  two Input loader entry points. Macro expansions must reference the public
+  framework contract and must not require application authors to handle ABI
+  details. Both macros may coexist once each in one `cdylib`.
 - examples/telemetry-plugin is an example and an end-to-end boundary fixture,
   not a hidden product crate. Keep its state and behavior useful for real ETS2
   validation, but do not put bridge, web, dispatcher, or save-game features in it.
 - examples/telemetry-fallback-plugin is a manual real-ETS loader negotiation
   fixture. It intentionally rejects Telemetry API 1.01 with `Unsupported`,
   accepts exactly 1.00, and must remain isolated from the normal example.
+- examples/input-plugin is the safe Input API boundary and artifact fixture. It
+  registers one deterministic generic device explicitly and must remain free of
+  real hardware, network, bridge, dispatcher, or other product behavior.
 - Do not create dependency cycles or let higher-level concerns leak into lower
   layers. The intended direction is sys -> sdk -> plugin -> application.
 
@@ -89,12 +95,17 @@ worktree changes as user-owned and preserve them.
 - Never read inactive tagged-union members. Validate the SCS value tag first.
 - Do not read ABI padding that the SDK is not required to initialize. Preserve
   MaybeUninit where it represents that contract.
-- Calls back into the SDK must stay inside the game's permitted callback scope
-  and main thread. Do not make SdkCall storable, escapable, Send, or Sync.
+- Calls back into either SDK interface must stay inside the game's permitted
+  callback scope and main thread. Do not make `SdkCall`, `InputCall`, or
+  `InputInitCall` storable, escapable, Send, or Sync.
 - Callback context allocations must have stable addresses and valid provenance.
   Moving an Arc handle must not be confused with moving its pointee.
-- Registration is transactional: partial failure rolls back completed work in
-  reverse order, and normal shutdown unregisters in reverse order.
+- Telemetry registration is transactional: partial failure rolls back completed
+  work in reverse order, and normal shutdown unregisters in reverse order.
+  Input API 1.00 has no unregister function. After partial Input initialization,
+  retain already-published callback contexts conservatively and isolate them by
+  generation; after successful initialization, SCS invalidates registered
+  devices before `scs_input_shutdown`, so that completed generation can be freed.
 - Contain panics before every foreign ABI boundary. Preserve mutex-poison
   recovery, generation checks, retired-context retention after failed
   unregistration, and stale callback isolation.
@@ -107,6 +118,13 @@ worktree changes as user-owned and preserve them.
 - Prefer explicit declarations over inference. A plugin subscribes to each event
   and channel in TelemetryPlugin::initialize; the framework must not infer
   subscriptions from implemented callbacks or automatically subscribe catalogs.
+- An Input plugin registers every device explicitly in `InputPlugin::initialize`.
+  Device activity notifications are opt-in, input order is the device-local
+  `InputIndex` domain, and the framework must not infer devices from callback
+  implementations.
+- Safe float input events use `InputAxisValue`. Accept only finite normalized
+  values in the inclusive -1.0 through 1.0 interval and reject invalid values;
+  do not silently clamp them or expose an arbitrary `f32` in application APIs.
 - Keep scalar SDK indices, indexed channel indices, and trailer indices distinct
   in both types and method names. Do not merge them into an ambiguous integer API.
 - Use `SdkIndex` for SDK array slots, `TrailerIndex` for the numbered trailer
@@ -114,11 +132,14 @@ worktree changes as user-owned and preserve them.
   code must not use a bare `u32` as one of these domains, and legacy `trailer`
   must remain distinguishable from numbered `trailer.0`.
 - Version negotiation must use strong version types and explicit supported
-  variants. Keep Telemetry API version, telemetry game/schema version, and public
-  game version separate.
+  variants. Keep Telemetry API version, telemetry game/schema version, Input API
+  version, per-game Input version, and public game version separate.
 - scs-sdk::TelemetryApi is the single source of truth for audited ABI adapters.
   Framework code consumes that result and must not maintain a second API-version
   whitelist. PluginCompatibility separately describes product requirements.
+- scs-sdk::InputApi is likewise the single source of truth for the audited Input
+  ABI adapter. `InputPluginCompatibility` describes product requirements without
+  duplicating the wrapper's supported-version policy.
 - scs-sdk::Event is the single typed event-identifier catalog. Framework APIs
   may re-export it under a lifecycle-oriented name, but must not duplicate its
   variants, raw discriminator mapping, or official capability metadata.
@@ -155,9 +176,11 @@ Complete coverage requires auditable evidence, not a large list of constants.
 For changes to SDK coverage:
 
 - Compare against the official SDK 1.14 headers.
-- Preserve every public telemetry ABI type, result code, version constant, event,
+- Preserve every public Telemetry ABI type, result code, version constant, event,
   channel, configuration ID/attribute, gameplay event/attribute, game ID, and
-  game-version constant within the declared scope.
+  game-version constant within the declared scope. Independently preserve every
+  public Input API 1.00 constant, type, layout, callback, flag, device/value kind,
+  per-game version, and the 400-input limit.
 - Preserve header ordering in raw ALL catalogs and type/value/index metadata in
   high-level catalogs.
 - Descriptor availability belongs to the per-game telemetry schema. Derive
@@ -171,9 +194,9 @@ For changes to SDK coverage:
   inventory is 107 channels, 6 configuration IDs, 60 configuration attributes,
   71 configuration-to-attribute associations, 6 gameplay events, 15 gameplay
   attributes, and 21 gameplay-to-attribute associations.
-- Do not call input-device support implemented until its raw ABI, safe wrapper,
-  framework contract, tests, examples, documentation, and cross-platform build
-  implications have all been handled.
+- Input coverage must remain end to end: raw ABI, safe wrapper, independent
+  runtime and trait, export macro, pass/missing-trait/combined fixtures, safe
+  example, documentation, Miri, and all three platform artifact checks.
 
 ## Rust Style
 
@@ -202,14 +225,18 @@ For changes to SDK coverage:
 
 - export_plugin!(Plugin::default()) must generate exactly the two loader-visible
   exports scs_telemetry_init and scs_telemetry_shutdown.
+- export_input_plugin!(Plugin::default()) must generate exactly the two
+  loader-visible exports scs_input_init and scs_input_shutdown.
 - The calling application should need only a normal safe constructor expression
-  whose type implements TelemetryPlugin.
+  whose type implements the corresponding TelemetryPlugin or InputPlugin trait.
+- One invocation of each macro may coexist in one `cdylib`; the combined fixture
+  must retain exactly all four loader exports and two independent runtimes.
 - Preserve the independent consumer fixture under
   crates/scs-sdk-plugin/tests/fixtures/export-plugin/.
-- The pass fixture must compile as a real cdylib, retain both exports after
+- Each pass fixture must compile as a real cdylib, retain its exact exports after
   release linking/stripping, and keep application source safe.
-- The missing-trait fixture must fail for the expected TelemetryPlugin bound,
-  not for an unrelated path, dependency, or syntax error.
+- Each missing-trait fixture must fail for the expected TelemetryPlugin or
+  InputPlugin bound, not for an unrelated path, dependency, or syntax error.
 - Do not replace this fixture with an ignored doctest. It exists specifically to
   validate expansion across the real public dependency boundary.
 
@@ -222,7 +249,8 @@ For changes to SDK coverage:
 - Linux release builds retain the documented glibc 2.17 floor and use the
   repository Zig/cargo-zigbuild flow.
 - A successful cargo build is insufficient. Verify file format, x86-64
-  architecture, and both loader-visible dynamic exports using repository scripts.
+  architecture, and the exact two or four loader-visible dynamic exports using
+  repository scripts.
 - Keep build, verification, installer, CI artifact, README, and Cargo library
   names synchronized when an example or package is renamed.
 - The macOS installer may clear quarantine and ad-hoc sign the plugin itself. Do
@@ -233,7 +261,7 @@ For changes to SDK coverage:
   Their installers may remove only each other's exact known filenames after the
   newly selected artifact has passed format, signature, and export validation.
 - Game Archive Packer is for SCS game/mod archives; it is not the packaging format
-  for native telemetry DLL, shared-object, or dylib plugins.
+  for native Telemetry or Input DLL, shared-object, or dylib plugins.
 
 ## Licensing
 
@@ -266,8 +294,9 @@ For changes to SDK coverage:
   resolution, pinned tool versions, and relevant path filters.
 - Keep formatting/boundary checks, workspace tests, Miri, and the three platform
   artifact builds as distinct gates so a failure identifies the broken contract.
-- CI must verify the telemetry example and the independent macro fixture as real
-  release dynamic libraries, including architecture and both dynamic exports.
+- CI must verify the Telemetry and Input examples plus independent Telemetry,
+  Input, and combined macro fixtures as real release dynamic libraries,
+  including architecture and the exact dynamic export set.
 - Do not replace a platform job with host-only cargo check, and do not upload an
   artifact that has not passed the repository verification script.
 - When changing pinned Rust, nightly Miri, Zig, cargo-zigbuild, target, or glibc
@@ -311,8 +340,14 @@ work complete, run the full local gate where required toolchains are present:
 For release artifact or export changes, also run the applicable platform scripts:
 
     scripts/build-windows-plugin.sh
+    scripts/build-windows-input-plugin.sh
+    scripts/build-windows-plugin-macro-fixture.sh
     scripts/build-linux-plugin.sh
+    scripts/build-linux-input-plugin.sh
+    scripts/build-linux-plugin-macro-fixture.sh
     scripts/build-macos-plugin.sh
+    scripts/build-macos-input-plugin.sh
+    scripts/build-macos-plugin-macro-fixture.sh
 
 If a toolchain or platform check was not run, report that fact explicitly. Do not
 claim cross-platform completion based only on compilation for the host platform.
@@ -342,6 +377,9 @@ claim cross-platform completion based only on compilation for the host platform.
 - Confirm runtime identity through all of: loaded library name, framework startup
   metadata, product log prefix, subscription counts, shutdown metadata, and
   unloaded library name.
+- Before releasing Input support, additionally confirm device registration,
+  `active=true`, first-after-activation polling, one float event, one bool event,
+  end-of-sequence, clean Input shutdown, and unload from a real ETS2 process.
 - Check for legacy prefixes or a second legacy dylib before declaring a renamed
   plugin installed correctly.
 - Preserve meaningful E2E evidence such as API/schema negotiation, event/channel

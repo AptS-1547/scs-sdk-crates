@@ -5,11 +5,12 @@ crate owns the safe application framework and the audited runtime boundary.
 
 ## Ownership
 
-- Own TelemetryPlugin, PluginContext, PluginMetadata, owned GameInfo, safe event
-  payloads, explicit subscription APIs, runtime state, and callback dispatch.
+- Own `TelemetryPlugin`, `InputPlugin`, both safe contexts and compatibility
+  contracts, `PluginMetadata`, owned game identities, explicit registration,
+  runtime state, and callback dispatch.
 - Own every lifecycle mechanism shared by plugins: initialization, registration
-  commit, reverse rollback, reverse shutdown, reinitialization, panic containment,
-  poison recovery, generation isolation, and foreign context retention.
+  commit, rollback or conservative retirement, shutdown, reinitialization, panic
+  containment, poison recovery, generation isolation, and context retention.
 - Do not put product telemetry state, dispatcher behavior, shared-memory protocol,
   web transport, or save-game logic in this crate.
 - Application crates should need only scs-sdk-plugin in their manifest. Re-export
@@ -17,7 +18,8 @@ crate owns the safe application framework and the audited runtime boundary.
 
 ## Application Safety Boundary
 
-- All normal TelemetryPlugin implementations must be writable in safe Rust.
+- All normal TelemetryPlugin and InputPlugin implementations must be writable in
+  safe Rust.
   Public plugin hooks and context methods must not expose raw pointers, CStr,
   CString, extern callback functions, sys unions, or unsafe preconditions.
 - Keep initialization subscriptions explicit. Do not infer an event subscription
@@ -43,6 +45,11 @@ crate owns the safe application framework and the audited runtime boundary.
   successfully; on failure, unregister the completed prefix in reverse order.
 - Shutdown unregisters channels and events in reverse order and invokes the plugin
   shutdown hook according to the documented lifecycle contract.
+- Input API 1.00 provides registration but no unregister callback. A partial
+  Input initialization failure therefore retires already-published callback
+  contexts for process lifetime and relies on generation checks to reject stale
+  calls. After a successful session, SCS unregisters devices before
+  `scs_input_shutdown`, allowing that generation to be released.
 - Each registration context must have a stable allocation. Store Arc handles
   without creating competing unique references to the foreign-visible pointee.
 - Generation numbers isolate delayed callbacks from a prior session. A stale
@@ -54,9 +61,13 @@ crate owns the safe application framework and the audited runtime boundary.
 - Recover poisoned mutex state deliberately and keep lifecycle invariants intact;
   do not replace poison recovery with unwrap or expect.
 - Do not hold or construct an SDK call outside a direct game callback scope. Do
-  not move callback handling to a worker thread.
+  not move callback handling to a worker thread. This restriction applies to
+  Telemetry `SdkCall` and Input `InputCall`/`InputInitCall` alike.
 - Keep runtime logging bounded and lifecycle-focused. Product probe lines belong
   in the example or product plugin, not this framework.
+- Re-export and preserve `InputAxisValue` on float input events. Safe plugins
+  must not bypass its finite inclusive -1.0 through 1.0 contract or silently
+  clamp invalid device data in the runtime.
 
 ## Unsafe Review
 
@@ -77,6 +88,8 @@ crate owns the safe application framework and the audited runtime boundary.
 - Treat scs-sdk::TelemetryApi as the sole owner of audited API adapters and its
   supported-version list. Do not repeat that whitelist in the runtime; consume
   the wrapper result and translate it into framework diagnostics and SCS results.
+- Apply the same ownership rule to `scs_sdk::InputApi`; the Input runtime must
+  not maintain a second list of supported Input API versions.
 - Keep wrapper capability separate from product requirements. Every product
   declares PluginCompatibility explicitly, and the runtime validates its minimum
   API and per-game schema requirements before product initialization.
@@ -112,8 +125,9 @@ crate owns the safe application framework and the audited runtime boundary.
 - Retain unknown game IDs in Game::Other with their owned textual ID and name.
 - Errors should preserve the SCS result and enough context for a useful game-log
   diagnostic without exposing internal pointer details.
-- Public changes must remain usable through export_plugin! and the isolated
-  consumer fixture. Avoid hidden paths that only work inside this workspace.
+- Public changes must remain usable through `export_plugin!` or
+  `export_input_plugin!` and the isolated consumer fixtures. Avoid hidden paths
+  that only work inside this workspace.
 
 ## Tests and Fixtures
 
@@ -123,7 +137,8 @@ crate owns the safe application framework and the audited runtime boundary.
 - Do not use timing assumptions for lifecycle tests. Drive fake SDK callbacks and
   registration results deterministically.
 - Preserve crates/scs-sdk-plugin/tests/fixtures/export-plugin as an independent
-  consumer workspace. Its pass and missing-trait packages are part of this crate's
+  consumer workspace. Its Telemetry pass/missing-trait, Input
+  pass/missing-trait, and combined four-export packages are part of this crate's
   public compatibility contract.
 - Do not weaken expected compile-fail diagnostics to accept unrelated failures.
 

@@ -28,6 +28,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "scs-sdk-combined-plugin-export-fixture"
+version = "0.0.0"
+dependencies = [
+ "scs-sdk-plugin",
+]
+
+[[package]]
+name = "scs-sdk-input-plugin-export-fixture"
+version = "0.0.0"
+dependencies = [
+ "scs-sdk-plugin",
+]
+
+[[package]]
+name = "scs-sdk-input-plugin-missing-trait-fixture"
+version = "0.0.0"
+dependencies = [
+ "scs-sdk-plugin",
+]
+
+[[package]]
 name = "scs-sdk-plugin"
 version = "0.1.0"
 dependencies = [

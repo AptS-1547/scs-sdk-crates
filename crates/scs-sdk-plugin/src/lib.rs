@@ -36,6 +36,8 @@
     )
 )]
 
+mod input;
+mod input_runtime;
 mod runtime;
 
 use std::borrow::Cow;
@@ -49,12 +51,18 @@ use scs_sdk::{
     TrailerConfigurationId, TrailerIndex, ValueRef,
 };
 
+pub use input::{
+    InputAxisValue, InputAxisValueError, InputDeviceId, InputDeviceSpec, InputDeviceType,
+    InputEvent, InputEventFlags, InputEventRequest, InputGameCompatibility, InputGameInfo,
+    InputIndex, InputPlugin, InputPluginCompatibility, InputPluginContext, InputSpec, InputValue,
+    InputValueType,
+};
 /// Typed descriptor and value layer used when implementing plugin hooks.
 ///
 /// Re-exporting the middle layer keeps application manifests dependent on the
 /// framework crate alone while preserving its normal module organization.
 pub use scs_sdk as sdk;
-pub use scs_sdk_plugin_macros::export_plugin;
+pub use scs_sdk_plugin_macros::{export_input_plugin, export_plugin};
 
 /// Application-facing name for the canonical [`sdk::Event`] descriptor.
 ///
@@ -149,6 +157,20 @@ pub enum Game {
     Other,
 }
 
+pub(crate) fn classify_game_id(id: &CStr) -> Game {
+    // Compare the exact NUL-terminated identifiers declared by the raw SDK
+    // layer. Keeping the official bytes there avoids independent handwritten
+    // `eut2`/`ats` catalogs in telemetry and input framework code.
+    let id_bytes = id.to_bytes_with_nul();
+    if id_bytes == scs_sdk::sys::SCS_GAME_ID_EUT2 {
+        Game::EuroTruckSimulator2
+    } else if id_bytes == scs_sdk::sys::SCS_GAME_ID_ATS {
+        Game::AmericanTruckSimulator
+    } else {
+        Game::Other
+    }
+}
+
 /// Owned identity of the game which loaded the plugin.
 ///
 /// SCS only promises that the original C strings remain live during the
@@ -164,22 +186,10 @@ pub struct GameInfo {
 
 impl GameInfo {
     pub(crate) fn new(name: &CStr, id: &CStr, schema_version: GameSchemaVersion) -> Self {
-        // Compare the exact NUL-terminated identifiers declared by the raw SDK
-        // layer. Keeping the official bytes there avoids a third handwritten
-        // `eut2`/`ats` catalog in the framework while this owned type remains
-        // responsible for application-facing classification.
-        let id_bytes = id.to_bytes_with_nul();
-        let kind = if id_bytes == scs_sdk::sys::SCS_GAME_ID_EUT2 {
-            Game::EuroTruckSimulator2
-        } else if id_bytes == scs_sdk::sys::SCS_GAME_ID_ATS {
-            Game::AmericanTruckSimulator
-        } else {
-            Game::Other
-        };
         Self {
             name: name.to_string_lossy().into_owned(),
             id: id.to_string_lossy().into_owned(),
-            kind,
+            kind: classify_game_id(id),
             schema_version,
         }
     }
@@ -1420,8 +1430,9 @@ pub trait TelemetryPlugin: Send + 'static {
 /// signatures may evolve together with the macro crate between releases.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::input_runtime::InputRuntime;
     pub use crate::runtime::Runtime;
-    pub use scs_sdk_sys::{ScsResult, ScsTelemetryInitParams, ScsU32};
+    pub use scs_sdk_sys::{ScsInputInitParams, ScsResult, ScsTelemetryInitParams, ScsU32};
 }
 
 #[cfg(test)]

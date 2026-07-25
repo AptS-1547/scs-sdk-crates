@@ -3,7 +3,7 @@
 [中文](README.zh.md) | **English**
 
 `scs-sdk-plugin` is the safe application framework and audited runtime boundary
-for native SCS telemetry plugins. It combines the typed
+for native SCS telemetry and input-device plugins. It combines the typed
 [`scs-sdk`](../scs-sdk/) layer with lifecycle management, transactional
 registration, callback dispatch, panic containment, and stable foreign context
 ownership so ordinary plugin source can remain safe Rust.
@@ -12,13 +12,13 @@ The crate deliberately re-exports both application-facing dependencies:
 
 ```rust
 pub use scs_sdk as sdk;
-pub use scs_sdk_plugin_macros::export_plugin;
+pub use scs_sdk_plugin_macros::{export_input_plugin, export_plugin};
 ```
 
 A product plugin normally needs only `scs-sdk-plugin` in its manifest.
 
-> The framework covers the public **SCS Telemetry SDK 1.14** interface. The
-> SDK's input-device API is not implemented by this workspace yet.
+> The framework provides independent safe runtimes for Telemetry API 1.00/1.01
+> and Input API 1.00.
 
 This is an independent community crate and is not affiliated with or endorsed
 by SCS Software.
@@ -38,6 +38,13 @@ Applications implement `TelemetryPlugin` with four explicit concerns:
 The runtime owns ABI entry points and foreign callback plumbing. Application
 source does not need raw pointers, C strings, handwritten `extern` functions,
 raw SCS unions, direct `scs-sdk-sys` access, or `unsafe` blocks.
+
+Input applications implement `InputPlugin`, declare every device through
+`InputPluginContext::register_device`, and return typed `InputEvent` values
+from `next_input_event`. Activity notification remains opt-in on each
+`InputDeviceSpec`. The input runtime validates names, device-local indices,
+registered bool/float types, panic containment, generation isolation, and the
+official automatic-unregistration-before-shutdown lifecycle.
 
 ## Minimal safe plugin
 
@@ -151,6 +158,11 @@ collapsed into a known value.
 `TelemetryEventKind` is a re-export of `scs_sdk::Event`, not a duplicate event
 catalog. Registration identity and callback payloads therefore have distinct
 types without maintaining two raw discriminator maps.
+
+Input callbacks return `InputValue::Float(InputAxisValue)` for float axes.
+`InputAxisValue` is re-exported by the framework and makes the finite inclusive
+-1.0 through 1.0 contract explicit at the application boundary; arbitrary raw
+floats never reach the runtime through safe plugin code.
 
 ## Runtime guarantees
 

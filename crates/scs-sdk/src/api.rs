@@ -99,6 +99,15 @@ pub struct ScopedLogger<'scope> {
     scope: PhantomData<&'scope SdkCall<'scope>>,
 }
 
+impl ScopedLogger<'_> {
+    pub(crate) const fn from_raw(raw: sys::ScsLog) -> Self {
+        Self {
+            raw,
+            scope: PhantomData,
+        }
+    }
+}
+
 /// Initialization-parameter layout selected for one audited API version.
 ///
 /// SCS SDK 1.14 defines separate names for the 1.00 and 1.01 parameter types,
@@ -311,10 +320,7 @@ impl SdkCall<'_> {
 
     #[must_use]
     pub const fn logger(&self) -> ScopedLogger<'_> {
-        ScopedLogger {
-            raw: self.table.logger.0,
-            scope: PhantomData,
-        }
+        ScopedLogger::from_raw(self.table.logger.0)
     }
 
     /// Registers an SDK event callback.

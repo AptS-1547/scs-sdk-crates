@@ -5,8 +5,9 @@ This crate is the safe, typed, no_std interpretation of scs-sdk-sys.
 
 ## Ownership
 
-- Own typed SDK result codes, versions, values, geometry, descriptors, catalogs,
-  callback-time borrowed views, scoped logging, and scoped registration calls.
+- Own typed SDK result codes, Telemetry and Input versions, values, geometry,
+  descriptors, catalogs, callback-time borrowed views, scoped logging, and
+  scoped registration calls.
 - Do not own process-global state, exported symbols, plugin trait objects,
   registration transactions, callback context allocations, panic containment, or
   product behavior. Those belong in scs-sdk-plugin or the application.
@@ -23,9 +24,10 @@ This crate is the safe, typed, no_std interpretation of scs-sdk-sys.
   None without touching inactive storage.
 - Borrowed callback views must not outlive the SDK callback scope. Tie lifetimes
   to input references and do not create 'static references from foreign pointers.
-- SdkCall must remain scoped, non-storable, non-Send, and non-Sync. SDK calls are
-  allowed only while SCS directly invokes init, callback, or shutdown on its main
-  thread.
+- `SdkCall`, `InputCall`, and `InputInitCall` must remain scoped, non-storable,
+  non-Send, and non-Sync. SDK calls are allowed only while SCS directly invokes
+  init, callback, or shutdown on its main thread. Device registration is exposed
+  only through `InputInitCall` because the official Input API limits it to init.
 - Keep Rust-owned geometry values free of ABI padding. Copy meaningful fields
   individually rather than copying bytes whose initialization is not guaranteed.
 - NamedValues iteration must honor the SDK sentinel contract, validate each value
@@ -34,6 +36,12 @@ This crate is the safe, typed, no_std interpretation of scs-sdk-sys.
   call and must not expose CStr or CString to application code.
 - Preserve every SDK result code as a distinct SdkError variant. Do not collapse
   errors merely to simplify callers.
+- Validate `InputIndex` against the official 400-input limit and validate the
+  event value type before writing the corresponding raw union member. Unknown
+  raw input value types remain unknown rather than being interpreted as float.
+- Keep safe float input events normalized through `InputAxisValue`: accept only
+  finite values in the inclusive -1.0 through 1.0 interval, reject rather than
+  clamp invalid values, and leave arbitrary raw floats to the sys escape hatch.
 
 ## Typed Catalog Design
 

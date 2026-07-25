@@ -3,7 +3,7 @@
 [中文](README.zh.md) | **English**
 
 `scs-sdk-sys` is the dependency-free, `no_std`, handwritten raw ABI layer for
-the public **SCS Telemetry SDK 1.14** interface on 64-bit game processes. It
+the public telemetry and input interfaces in **SCS SDK 1.14** on 64-bit game processes. It
 mirrors the C declarations used by Euro Truck Simulator 2 and American Truck
 Simulator without adding wrapper policy, plugin lifecycle, or product logic.
 
@@ -12,8 +12,8 @@ The authoritative source is the official header distribution preserved under
 are reviewed against those files for layout, numeric values, function
 signatures, calling conventions, and NUL-terminated byte constants.
 
-> This crate covers the public **telemetry** interface from SDK 1.14. The SDK's
-> input-device API is not implemented by this workspace yet.
+> This crate covers the public Telemetry API 1.00/1.01 and Input API 1.00
+> declarations present in SDK 1.14.
 
 This is an independent community crate and is not affiliated with or endorsed
 by SCS Software.
@@ -39,6 +39,7 @@ by SCS Software.
 | `constants` | SDK result codes, version constants, log levels, flags, and shared ABI scalar types. |
 | `value` | `repr(C)` tagged values, vectors, Euler angles, placements, named values, and the value union. |
 | `telemetry` | Initialization structures, function pointers, callback types, event payload layouts, and plugin entry-point types. |
+| `input` | Input initialization, device descriptors, bool/float event union, callbacks, flags, limits, and game-version constants. |
 | `channels` | Common, truck, trailer, and job channel byte-string constants plus ordered catalogs. |
 | `configuration` | Configuration IDs and attribute constants. |
 | `gameplay` | Gameplay event IDs and attribute constants. |
@@ -53,6 +54,10 @@ The raw SDK 1.14 telemetry inventory is:
 | Configuration attributes | 60 |
 | Gameplay event IDs | 6 |
 | Gameplay attributes | 15 |
+
+The raw Input API inventory additionally covers two device classes, two value
+types, two callback flags, the 400-input limit, the v1.00 init layout, and both
+loader callbacks/exports.
 
 Raw `ALL` catalogs retain header order and raw metadata. Higher layers add
 typed descriptors and association catalogs; this crate does not infer those

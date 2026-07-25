@@ -4,7 +4,13 @@
 # isolated catches accidental reliance on root-workspace dependencies, lints,
 # features, or implicit imports.
 [workspace]
-members = ["missing-trait", "pass"]
+members = [
+  "combined-pass",
+  "input-missing-trait",
+  "input-pass",
+  "missing-trait",
+  "pass",
+]
 resolver = "3"
 
 [workspace.package]

@@ -3,13 +3,12 @@
 [中文](README.zh.md) | **English**
 
 `scs-sdk` is the safe, typed, `no_std` interpretation of
-[`scs-sdk-sys`](../scs-sdk-sys/) for the public SCS Telemetry SDK 1.14
+[`scs-sdk-sys`](../scs-sdk-sys/) for the public telemetry and input interfaces in SCS SDK 1.14
 interface. It turns the header-shaped ABI into typed Rust values, descriptors,
 catalogs, version domains, and callback-scoped SDK operations without taking
 ownership of plugin lifecycle or product state.
 
-> This crate covers the public **telemetry** interface from SDK 1.14. The SDK's
-> input-device API is not implemented by this workspace yet.
+> Telemetry and Input version domains and call capabilities remain independent.
 
 This is an independent community crate and is not affiliated with or endorsed
 by SCS Software.
@@ -23,6 +22,8 @@ This layer owns:
 - channel, configuration, gameplay, event, and attribute descriptors;
 - borrowed callback views whose lifetime cannot exceed the callback data;
 - scoped registration, unregistration, and logging calls back into SCS; and
+- input-device declarations, input indices/values/flags, init-only device
+  registration, and callback-scoped input logging; and
 - complete enumerable catalogs with official capability history.
 
 It deliberately does **not** own exported loader symbols, process-global
@@ -47,8 +48,13 @@ TelemetryApiVersion::V1_01
 Unknown raw versions remain representable for diagnostics, but are not silently
 reinterpreted as the newest known layout. `TelemetryApiVersion` describes the
 plugin ABI negotiated with the loader; `GameSchemaVersion` describes one
-game's telemetry descriptor schema. They are separate strong types and must not
+game’s telemetry descriptor schema. They are separate strong types and must not
 be confused with an SDK archive suffix or a public game patch version.
+
+`InputApi` separately accepts only `InputApiVersion::V1_00`.
+`InputGameVersion` is distinct from both telemetry version types.
+`InputInitCall` alone can register a device, while `InputCall` and
+`InputSession` keep later callbacks and shutdown scoped to direct SCS calls.
 
 Key scoped types include:
 
@@ -76,6 +82,13 @@ foreign callback lifetime.
 Rust-owned geometry types—`FVector`, `DVector`, `Euler`, `FPlacement`, and
 `DPlacement`—copy only meaningful fields. They do not copy ABI padding which
 SCS is not required to initialize.
+
+`InputAxisValue` models the normalized float domain used by game input axes.
+Its constructor preserves every finite value from -1.0 through 1.0, including
+negative zero, and rejects NaN, infinities, and finite out-of-range values.
+`InputValue::Float` carries this strong type rather than an arbitrary `f32`, so
+safe application code cannot send a value which the game interprets as an
+invalid neutral input.
 
 `NamedValues<'a>` implements the SDK sentinel iteration contract for
 configuration and gameplay payloads. It terminates at the foreign sentinel and

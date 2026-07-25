@@ -2,27 +2,28 @@
 
 # SCS SDK Rust Crates
 
-**Build native SCS telemetry plugins in safe, typed Rust.**
+**Build native SCS telemetry and input-device plugins in safe, typed Rust.**
 
-Complete Telemetry SDK 1.14 coverage · audited FFI and lifecycle boundaries · verified Windows, Linux, and macOS artifacts
+Complete public Telemetry and Input SDK 1.14 coverage · audited FFI and lifecycle boundaries · verified Windows, Linux, and macOS artifacts
 
 **English** · [简体中文](README.zh.md)
 
 </div>
 
-`scs-sdk-crates` is a reusable Rust foundation for the public **SCS Telemetry
-SDK 1.14** interface. It turns the official C ABI into typed `no_std` bindings,
-adds a safe plugin runtime, and provides a real ETS2 plugin that proves the
-application boundary and final native artifacts.
+`scs-sdk-crates` is a reusable Rust foundation for the public telemetry and
+input-device interfaces in **SCS SDK 1.14**. It turns the official C ABI into
+typed `no_std` bindings, adds safe API-specific plugin runtimes, and provides
+real plugin examples that prove the application boundary and final artifacts.
 
 The workspace is implemented entirely in Rust. Plugin authors do not need a C
 or C++ shim, CMake, bindgen, raw pointers, handwritten exports, or application
 `unsafe`.
 
 > [!IMPORTANT]
-> This repository covers the complete public **telemetry** interface in SCS SDK
-> 1.14—not the entire SCS SDK. The input-device API is outside the currently
-> implemented scope.
+> This repository covers the complete public **Telemetry API 1.00/1.01** and
+> **Input API 1.00** interfaces present in SCS SDK 1.14. Coverage claims remain
+> scoped to those audited public interfaces rather than unspecified future SDK
+> additions.
 
 > [!NOTE]
 > This is an independent community project and is not affiliated with or
@@ -35,9 +36,9 @@ or C++ shim, CMake, bindgen, raw pointers, handwritten exports, or application
 | Need | What this repository provides |
 | --- | --- |
 | Auditable SDK coverage | Header-ordered raw catalogs and typed catalogs for all 107 channels, 6 configuration IDs, 60 configuration attributes, 6 gameplay events, and 15 gameplay attributes. |
-| Safe application code | A `TelemetryPlugin` API with typed channels, events, values, indices, game identity, and compatibility declarations. |
-| Shared runtime correctness | Transactional registration, reverse rollback and shutdown, panic containment, stable callback contexts, poison recovery, and stale-callback isolation. |
-| Honest artifact proof | Release scripts inspect PE, ELF, and Mach-O format, x86-64 architecture, and the exact two SCS loader exports after linking and stripping. |
+| Safe application code | Independent `TelemetryPlugin` and `InputPlugin` APIs with typed values, indices, game identity, compatibility, and explicit registration. |
+| Shared runtime correctness | Telemetry transactions plus Input device lifetime handling, panic containment, stable callback contexts, poison recovery, and stale-callback isolation. |
+| Honest artifact proof | Release scripts inspect PE, ELF, and Mach-O format, x86-64 architecture, and the exact API-specific export set after linking and stripping. |
 | Real game evidence | A safe example runs in ETS2 with six event classes and eight channels; a separate probe verifies the loader's documented API fallback sequence. |
 
 The result is deliberately a foundation rather than a product plugin. Web
@@ -101,8 +102,9 @@ scs_telemetry_init
 scs_telemetry_shutdown
 ```
 
-Continue with the [safe plugin framework guide](crates/scs-sdk-plugin/) or the
-[real telemetry example](examples/telemetry-plugin/).
+Continue with the [safe plugin framework guide](crates/scs-sdk-plugin/), the
+[real telemetry example](examples/telemetry-plugin/), or the
+[input-device example](examples/input-plugin/).
 
 ## Proof before promises
 
@@ -150,7 +152,8 @@ scs-sdk                 no_std values, descriptors, catalogs, decoding
         ▼
 scs-sdk-sys             no_std x86-64 C ABI definitions
 
-scs-sdk-plugin-macros   generates the two exported loader entry points
+examples/input-plugin uses the same layers through the independent InputPlugin
+runtime. scs-sdk-plugin-macros generates the two exports for each selected API.
 ```
 
 | Layer | Owns | Does not own |
@@ -158,8 +161,9 @@ scs-sdk-plugin-macros   generates the two exported loader entry points
 | [`scs-sdk-sys`](crates/scs-sdk-sys/) | Raw function pointers, unions, structures, constants, catalogs, layout assertions, and ABI-required `unsafe`. | Typed application policy or plugin lifecycle. |
 | [`scs-sdk`](crates/scs-sdk/) | Typed values and descriptors, version domains, catalog enumeration, tagged-union decoding, and callback-scoped calls into SCS. | Global runtime state, product state, or exported symbols. |
 | [`scs-sdk-plugin`](crates/scs-sdk-plugin/) | Safe plugin lifecycle, explicit registration, compatibility checks, callback dispatch, rollback, shutdown, and foreign-context ownership. | Networking, storage, dispatch, UI, or save-game features. |
-| [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | Expansion of a safe constructor expression into the two SCS loader exports. | Runtime policy or an application ABI surface. |
+| [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | Expansion of safe constructors into telemetry and/or input loader exports. | Runtime policy or product behavior. |
 | [`examples/telemetry-plugin`](examples/telemetry-plugin/) | A real safe plugin and end-to-end boundary fixture. | Product functionality. |
+| [`examples/input-plugin`](examples/input-plugin/) | A safe generic input device with typed bool/float events. | Hardware integration or product functionality. |
 
 The Cargo dependency direction remains:
 
@@ -194,6 +198,28 @@ API version, and ETS2/ATS telemetry game-version constant in SDK 1.14.
 Typed access does not erase future data. Known enum-like strings have closed
 catalogs with `ALL`, `COUNT`, `as_str`, `FromStr`, and schema availability,
 while generic string access keeps an unknown future value available verbatim.
+
+## Typed coverage of Input SDK 1.00
+
+Input support is a separate API surface rather than an extension of
+`TelemetryPlugin`:
+
+| Surface | Coverage |
+| --- | --- |
+| API versions | Input API 1.00 plus distinct ETS2/ATS input game versions |
+| Device classes | Generic and semantical |
+| Device shape | 1 to 400 explicitly declared bool/float inputs |
+| Callback flags | First in frame and first after activation, with unknown bits preserved |
+| Lifecycle | Init-only registration, optional activity callback, repeated next-event polling, automatic pre-shutdown unregistration |
+| Exports | `scs_input_init` and `scs_input_shutdown` |
+
+`InputIndex`, `InputDeviceId`, `InputAxisValue`, `InputValue`, and
+`InputEventFlags` keep callback domains explicit. `InputAxisValue` accepts only
+finite normalized positions in the inclusive -1.0 through 1.0 interval; it
+rejects invalid values instead of silently clamping them. The runtime validates
+device/input names, per-device index bounds, registered value types, panic
+containment, and stale contexts from partially failed initialization. The safe
+example and isolated macro fixtures contain no application `unsafe`.
 
 ## Contracts kept explicit
 
@@ -250,8 +276,11 @@ target directory or filename extension.
 | Platform | Target and compatibility | Command | Artifact |
 | --- | --- | --- | --- |
 | Windows | x86-64 GNU | `scripts/build-windows-plugin.sh` | `scs_sdk_telemetry_example.dll` |
+| Windows Input | x86-64 GNU | `scripts/build-windows-input-plugin.sh` | `scs_sdk_input_example.dll` |
 | Linux | x86-64, glibc 2.17 floor via Zig | `scripts/build-linux-plugin.sh` | `libscs_sdk_telemetry_example.so` |
+| Linux Input | x86-64, glibc 2.17 floor via Zig | `scripts/build-linux-input-plugin.sh` | `libscs_sdk_input_example.so` |
 | macOS | x86-64, including Apple Silicon through Rosetta | `scripts/build-macos-plugin.sh` | `libscs_sdk_telemetry_example.dylib` |
+| macOS Input | x86-64, including Apple Silicon through Rosetta | `scripts/build-macos-input-plugin.sh` | `libscs_sdk_input_example.dylib` |
 
 Verification checks the native format, x86-64 architecture, and exact dynamic
 export set. macOS builds additionally receive and verify an ad-hoc signature
@@ -267,6 +296,7 @@ crates/scs-sdk-sys/             raw no_std x86-64 ABI
 crates/scs-sdk/                 safe no_std typed wrapper and catalogs
 crates/scs-sdk-plugin/          safe lifecycle/runtime/framework
 crates/scs-sdk-plugin-macros/   exported-entry-point proc macro
+examples/input-plugin/          safe generic input-device plugin
 examples/telemetry-plugin/      real safe application-boundary plugin
 examples/telemetry-fallback-plugin/
                                 manual loader fallback E2E probe
@@ -279,6 +309,7 @@ third-party/scs_sdk_history/    official SDK 1.0–1.14 history and notices
 | --- | --- |
 | [`scs-sdk-plugin`](crates/scs-sdk-plugin/) | Writing a safe plugin and understanding lifecycle guarantees. |
 | [Telemetry example](examples/telemetry-plugin/) | Seeing explicit subscriptions, typed callbacks, build artifacts, and real ETS2 validation. |
+| [Input example](examples/input-plugin/) | Seeing explicit device registration and frame-scoped bool/float event generation. |
 | [`scs-sdk`](crates/scs-sdk/) | Typed descriptors, values, indices, versions, schema history, and decoding. |
 | [`scs-sdk-sys`](crates/scs-sdk-sys/) | Auditing the raw ABI and official header mapping. |
 | [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | Reviewing the exported-entry-point contract and independent consumer fixtures. |
@@ -289,8 +320,9 @@ third-party/scs_sdk_history/    official SDK 1.0–1.14 history and notices
 The workspace pins Rust `1.85.0` and keeps formatting/boundary checks,
 workspace tests, Miri, and all three platform artifact builds as separate CI
 gates. The independent proc-macro consumer fixture must compile as a real
-`cdylib`, preserve both exports after release linking, and fail with the
-expected trait-bound diagnostic when `TelemetryPlugin` is missing.
+`cdylib`, preserve the exact telemetry/input export sets after release
+linking, support a combined four-export artifact, and fail with the expected
+trait-bound diagnostic when either plugin trait is missing.
 
 <details>
 <summary><strong>Run the complete local foundation gate</strong></summary>

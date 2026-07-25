@@ -4,6 +4,7 @@ members = [
   "crates/scs-sdk-plugin",
   "crates/scs-sdk-plugin-macros",
   "crates/scs-sdk-sys",
+  "examples/input-plugin",
   "examples/telemetry-fallback-plugin",
   "examples/telemetry-plugin",
 ]

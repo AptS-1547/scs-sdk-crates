@@ -20,9 +20,11 @@ pub mod configuration;
 pub mod constants;
 pub mod gameplay;
 pub mod games;
+pub mod input;
 pub mod telemetry;
 pub mod value;
 
 pub use constants::*;
+pub use input::*;
 pub use telemetry::*;
 pub use value::*;

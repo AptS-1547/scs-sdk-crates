@@ -1,0 +1,16 @@
+[package]
+name = "scs-sdk-input-plugin-export-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Compile-pass fixture for scs-sdk-plugin input export generation"
+
+[lib]
+name = "scs_sdk_input_plugin_export_fixture"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+scs-sdk-plugin.workspace = true

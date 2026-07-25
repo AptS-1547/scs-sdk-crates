@@ -3,7 +3,7 @@
 **中文** | [English](README.md)
 
 `scs-sdk-sys` 是面向 64 位游戏进程、无依赖、`no_std`、手写实现的
-**SCS Telemetry SDK 1.14** 公共原始 ABI 层。它镜像 Euro Truck Simulator 2
+**SCS SDK 1.14** 公开 telemetry 与 input 接口的原始 ABI 层。它镜像 Euro Truck Simulator 2
 与 American Truck Simulator 使用的 C 声明，不负责安全 wrapper 策略、插件生命周期
 或产品逻辑。
 
@@ -11,8 +11,7 @@
 [`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/)。Rust 定义会逐项
 对照这些文件审计布局、数值、函数签名、调用约定与以 NUL 结尾的字节常量。
 
-> 本 crate 覆盖 SDK 1.14 的公共 **telemetry** 接口。SDK 中的 input-device API
-> 目前尚未由本 workspace 实现。
+> 本 crate 覆盖 SDK 1.14 中的公开 Telemetry API 1.00/1.01 与 Input API 1.00。
 
 本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
 
@@ -33,6 +32,7 @@
 | `constants` | SDK result code、版本常量、日志级别、flag 与共享 ABI 标量类型。 |
 | `value` | `repr(C)` tagged value、向量、欧拉角、placement、named value 与 value union。 |
 | `telemetry` | 初始化结构、函数指针、callback 类型、事件 payload 布局与插件入口类型。 |
+| `input` | Input 初始化、device descriptor、bool/float event union、callback、flag、限制与 game-version constant。 |
 | `channels` | common、truck、trailer、job channel 字节字符串常量与有序 catalog。 |
 | `configuration` | Configuration ID 与 attribute 常量。 |
 | `gameplay` | Gameplay event ID 与 attribute 常量。 |
@@ -47,6 +47,9 @@ SDK 1.14 telemetry 原始清单为：
 | Configuration attributes | 60 |
 | Gameplay event IDs | 6 |
 | Gameplay attributes | 15 |
+
+Input API 原始清单还覆盖 2 个 device class、2 个 value type、2 个 callback flag、
+每设备 400 input 上限、v1.00 init layout，以及两个 loader callback/export。
 
 原始 `ALL` catalog 保持 header 顺序与原始元数据。上层会增加 typed descriptor 与
 association catalog；本 crate 不根据产品行为推导这些策略。

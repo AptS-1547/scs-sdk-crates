@@ -3,12 +3,11 @@
 **中文** | [English](README.md)
 
 `scs-sdk` 是建立在 [`scs-sdk-sys`](../scs-sdk-sys/) 之上的安全、typed、
-`no_std` **SCS Telemetry SDK 1.14** 公共接口解释层。它把 header 形状的 ABI
+`no_std` **SCS SDK 1.14** 公开 telemetry 与 input 接口解释层。它把 header 形状的 ABI
 转换为 typed Rust value、descriptor、catalog、版本域和 callback scope 内的 SDK
 操作，但不接管插件生命周期或产品状态。
 
-> 本 crate 覆盖 SDK 1.14 的公共 **telemetry** 接口。SDK 中的 input-device API
-> 目前尚未由本 workspace 实现。
+> Telemetry 与 Input 的版本域和调用能力保持完全独立。
 
 本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
 
@@ -21,6 +20,8 @@
 - channel、configuration、gameplay、event 和 attribute descriptor；
 - 生命周期不会超过 callback 数据的 borrowed callback view；
 - callback scope 内回调 SCS 的注册、注销与日志能力；
+- input-device declaration、input index/value/flag、仅 init 可用的 device
+  registration，以及 callback-scoped input logging；
 - 带官方能力历史、可完整枚举的 catalog。
 
 它刻意**不负责** loader export、进程级 runtime 状态、callback context 分配、注册事务、
@@ -44,6 +45,11 @@ TelemetryApiVersion::V1_01
 游戏的 telemetry descriptor schema。二者是独立强类型，也都不等于 SDK 压缩包后缀
 或公开游戏补丁版本。
 
+`InputApi` 独立且只接受 `InputApiVersion::V1_00`。
+`InputGameVersion` 与两个 telemetry version type 都不同。
+只有 `InputInitCall` 可以注册 device；`InputCall` 与 `InputSession`
+则把后续 callback/shutdown 限制在 SCS 直接调用 scope 内。
+
 关键 scope 类型包括：
 
 - `TelemetryApi<'a>`：经过验证的初始化数据与已选择 ABI adapter；
@@ -63,6 +69,11 @@ named value 受 foreign callback 生命周期约束。
 
 Rust-owned geometry 类型 `FVector`、`DVector`、`Euler`、`FPlacement` 与
 `DPlacement` 只复制有意义的字段，不会复制 SCS 没有义务初始化的 ABI padding。
+
+`InputAxisValue` 表示游戏 input axis 使用的 normalized float domain。它的构造器会
+保留 -1.0 至 1.0 之间的所有 finite 值（包括负零），并拒绝 NaN、正负无穷和有限越界
+值。`InputValue::Float` 携带这个强类型，而不是任意 `f32`，因此 safe application
+代码不会把游戏解释为无效中位输入的数值发送出去。
 
 `NamedValues<'a>` 为 configuration 与 gameplay payload 实现 SDK sentinel iteration
 契约。它在 foreign sentinel 处终止并逐项验证，不会越界搜索任意内存。

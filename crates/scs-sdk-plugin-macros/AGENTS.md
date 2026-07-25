@@ -5,9 +5,11 @@ The macro is small because its responsibility is intentionally narrow.
 
 ## Ownership
 
-- Own syntax parsing and generated code for export_plugin! only.
-- Generate the process-lifetime Runtime storage and the two loader entry points
-  scs_telemetry_init and scs_telemetry_shutdown.
+- Own syntax parsing and generated code for `export_plugin!` and
+  `export_input_plugin!` only.
+- Generate independent process-lifetime `Runtime` or `InputRuntime` storage and
+  the corresponding fixed loader entry points: `scs_telemetry_init` plus
+  `scs_telemetry_shutdown`, or `scs_input_init` plus `scs_input_shutdown`.
 - Do not implement SDK version parsing, pointer validation, lifecycle policy,
   subscription behavior, callback dispatch, rollback, or product logic here.
   Delegate those mechanisms to scs-sdk-plugin Runtime.
@@ -19,10 +21,13 @@ The macro is small because its responsibility is intentionally narrow.
 
 - Parse the macro input as one normal Rust expression. It is evaluated exactly
   once for each accepted initialization attempt.
-- The generated factory must coerce the expression result to the framework's
-  TelemetryPlugin trait object so a missing implementation fails at compile time.
-- Generate exactly one stable runtime static and exactly two fixed exports. Do not
-  add aliases, platform-specific alternate names, or hidden extra loader symbols.
+- The generated factory must coerce the expression result to the corresponding
+  framework `TelemetryPlugin` or `InputPlugin` trait object so a missing
+  implementation fails at compile time.
+- Each macro generates exactly one stable runtime static and exactly two fixed
+  exports. Do not add aliases, platform-specific alternate names, or hidden
+  extra loader symbols. One invocation of each different macro may coexist and
+  must produce exactly four exports without static-name collisions.
 - Preserve extern "system", public visibility, no_mangle export behavior, raw
   parameter types, return type, and safety documentation required by the SCS ABI.
 - Application source remains safe. All unsafe tokens needed by the ABI must come
@@ -32,20 +37,23 @@ The macro is small because its responsibility is intentionally narrow.
 - Keep generated item names sufficiently private and specific to avoid collisions
   with ordinary application identifiers. Multiple invocations in one cdylib are
   unsupported because the SCS symbols are unique; retain clear documentation.
-- Keep generated documentation accurate for both ETS2 and ATS and for the actual
-  runtime shutdown behavior.
+- Keep generated documentation accurate for both ETS2 and ATS and for each
+  runtime's actual shutdown behavior, including the Input API's lack of an
+  explicit unregister function.
 
 ## Testing Contract
 
 - An ignored doctest is documentation only. It does not replace the independent
   consumer fixture owned under scs-sdk-plugin/tests/fixtures/export-plugin/.
-- The pass fixture must use only the public scs-sdk-plugin dependency, implement
-  TelemetryPlugin in safe source, expand export_plugin!, and build a real cdylib.
-- The missing-trait fixture must reach the generated trait-object coercion and fail
-  with E0277 for TelemetryPlugin. Path, parser, or dependency failures are not an
-  acceptable negative test result.
-- Windows PE, Linux ELF, and macOS Mach-O release fixtures must expose both exact
-  SCS symbols after LTO and stripping.
+- Telemetry and Input pass fixtures must use only the public scs-sdk-plugin
+  dependency, implement the corresponding trait in safe source, expand the
+  public macro, and build a real cdylib. The combined pass fixture invokes both.
+- Each missing-trait fixture must reach the generated trait-object coercion and
+  fail with E0277 for the corresponding trait. Path, parser, or dependency
+  failures are not an acceptable negative test result.
+- Windows PE, Linux ELF, and macOS Mach-O release fixtures must expose the exact
+  two-symbol set for each individual fixture and the exact four-symbol set for
+  the combined fixture after LTO and stripping.
 - When changing generated tokens, inspect expanded behavior through fixtures and
   final symbol tables rather than relying only on unit parsing tests.
 
