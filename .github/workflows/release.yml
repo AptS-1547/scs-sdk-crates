@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v-prefixed release tag to resume
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref }}
   # Publishing crates and releases is intentionally non-cancellable. A newer
   # tag must not interrupt an irreversible publication already in progress.
   cancel-in-progress: false
@@ -17,6 +23,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   validate:
@@ -28,6 +35,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup pinned Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
@@ -42,11 +50,11 @@ jobs:
       - name: Validate tag, version, and release branch
         shell: bash
         run: |
-          scripts/check-release-version.sh "$GITHUB_REF_NAME"
+          scripts/check-release-version.sh "$RELEASE_TAG"
 
-          tag_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
           if ! git merge-base --is-ancestor "$tag_commit" origin/master; then
-            echo "Release tag $GITHUB_REF_NAME is not contained in origin/master." >&2
+            echo "Release tag $RELEASE_TAG is not contained in origin/master." >&2
             exit 1
           fi
 
@@ -96,6 +104,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup pinned Miri toolchain
         uses: dtolnay/rust-toolchain@master
@@ -122,6 +131,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup pinned Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
@@ -141,7 +151,7 @@ jobs:
           shared-key: release-windows-x86-64-v1
 
       - name: Build, verify, and package examples
-        run: scripts/package-release-artifact.sh windows "$GITHUB_REF_NAME" dist
+        run: scripts/package-release-artifact.sh windows "$RELEASE_TAG" dist
 
       - name: Build and verify independent macro fixture
         run: scripts/build-windows-plugin-macro-fixture.sh
@@ -150,7 +160,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-windows-x86-64
-          path: dist/scs-sdk-crates-${{ github.ref_name }}-windows-x86_64.zip
+          path: dist/scs-sdk-crates-${{ env.RELEASE_TAG }}-windows-x86_64.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -163,6 +173,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup pinned Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
@@ -185,7 +196,7 @@ jobs:
           shared-key: release-linux-x86-64-glibc-2.17-v1
 
       - name: Build, verify, and package examples
-        run: scripts/package-release-artifact.sh linux "$GITHUB_REF_NAME" dist
+        run: scripts/package-release-artifact.sh linux "$RELEASE_TAG" dist
 
       - name: Build and verify independent macro fixture
         run: scripts/build-linux-plugin-macro-fixture.sh
@@ -194,7 +205,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-linux-x86-64-glibc-2.17
-          path: dist/scs-sdk-crates-${{ github.ref_name }}-linux-x86_64-glibc-2.17.tar.gz
+          path: dist/scs-sdk-crates-${{ env.RELEASE_TAG }}-linux-x86_64-glibc-2.17.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -207,6 +218,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup pinned Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
@@ -219,7 +231,7 @@ jobs:
           shared-key: release-macos-x86-64-v1
 
       - name: Build, verify, and package examples
-        run: scripts/package-release-artifact.sh macos "$GITHUB_REF_NAME" dist
+        run: scripts/package-release-artifact.sh macos "$RELEASE_TAG" dist
 
       - name: Build and verify independent macro fixture
         run: scripts/build-macos-plugin-macro-fixture.sh
@@ -228,7 +240,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-macos-x86-64
-          path: dist/scs-sdk-crates-${{ github.ref_name }}-macos-x86_64.tar.gz
+          path: dist/scs-sdk-crates-${{ env.RELEASE_TAG }}-macos-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -248,6 +260,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup pinned Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
@@ -270,6 +283,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
+
+      # A manual resume loads the workflow definition from the default branch
+      # while the release source remains pinned to the immutable tag above.
+      # Keep current workflow-only helpers separately so recovery fixes do not
+      # require moving a tag whose crates may already have been published.
+      - name: Checkout workflow helpers
+        uses: actions/checkout@v6
+        with:
+          path: .release-workflow
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
 
       - name: Download platform archives
         uses: actions/download-artifact@v8
@@ -279,10 +304,12 @@ jobs:
           merge-multiple: true
 
       - name: Verify platform archive set
-        run: scripts/verify-release-assets.sh release-assets "$GITHUB_REF_NAME" archives
+        run: >-
+          .release-workflow/scripts/verify-release-assets.sh
+          release-assets "$RELEASE_TAG" archives
 
       - name: Install pinned cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: v3.1.2
 
@@ -292,28 +319,27 @@ jobs:
           (
             cd release-assets
             sha256sum \
-              "scs-sdk-crates-$GITHUB_REF_NAME-linux-x86_64-glibc-2.17.tar.gz" \
-              "scs-sdk-crates-$GITHUB_REF_NAME-macos-x86_64.tar.gz" \
-              "scs-sdk-crates-$GITHUB_REF_NAME-windows-x86_64.zip" \
+              "scs-sdk-crates-$RELEASE_TAG-linux-x86_64-glibc-2.17.tar.gz" \
+              "scs-sdk-crates-$RELEASE_TAG-macos-x86_64.tar.gz" \
+              "scs-sdk-crates-$RELEASE_TAG-windows-x86_64.zip" \
               > checksums.txt
           )
 
           cosign sign-blob --yes \
-            release-assets/checksums.txt \
-            --output-signature release-assets/checksums.txt.sig \
-            --output-certificate release-assets/checksums.txt.pem
+            --bundle release-assets/checksums.txt.sigstore.json \
+            release-assets/checksums.txt
 
       - name: Verify generated signature and complete asset set
         shell: bash
         run: |
-          workflow_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$GITHUB_REF_NAME"
+          workflow_identity="https://github.com/$GITHUB_WORKFLOW_REF"
           cosign verify-blob release-assets/checksums.txt \
-            --signature release-assets/checksums.txt.sig \
-            --certificate release-assets/checksums.txt.pem \
+            --bundle release-assets/checksums.txt.sigstore.json \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$workflow_identity"
 
-          scripts/verify-release-assets.sh release-assets "$GITHUB_REF_NAME" complete
+          .release-workflow/scripts/verify-release-assets.sh \
+            release-assets "$RELEASE_TAG" complete
 
       - name: Generate release notes and body
         env:
@@ -322,12 +348,14 @@ jobs:
         run: |
           gh api --method POST \
             "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-            -f tag_name="$GITHUB_REF_NAME" \
-            -f target_commitish="$GITHUB_SHA" \
+            -f tag_name="$RELEASE_TAG" \
+            -f target_commitish="$(git rev-list -n 1 "$RELEASE_TAG")" \
             --jq .body > generated-notes.md
 
-          scripts/generate-release-body.sh \
-            "$GITHUB_REF_NAME" generated-notes.md release-body.md
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE" \
+            COSIGN_CERTIFICATE_IDENTITY="https://github.com/$GITHUB_WORKFLOW_REF" \
+            .release-workflow/scripts/generate-release-body.sh \
+              "$RELEASE_TAG" generated-notes.md release-body.md
 
       - name: Create or refresh draft release
         env:
@@ -335,32 +363,48 @@ jobs:
         shell: bash
         run: |
           release_flags=(--draft --verify-tag)
-          if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
+          prerelease=false
+          if [[ "${RELEASE_TAG#v}" == *-* ]]; then
+            prerelease=true
             release_flags+=(--prerelease --latest=false)
           fi
 
-          api_output="$(mktemp)"
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
-            >"$api_output" 2>&1; then
-            if [[ "$(jq -r .draft "$api_output")" != "true" ]]; then
-              echo "Release $GITHUB_REF_NAME already exists and is not a draft." >&2
+          if release_json="$(
+            .release-workflow/scripts/find-github-release.sh \
+              "$GITHUB_REPOSITORY" "$RELEASE_TAG"
+          )"; then
+            if [[ "$(jq -r .draft <<<"$release_json")" != "true" ]]; then
+              echo "Release $RELEASE_TAG already exists and is not a draft." >&2
               exit 1
             fi
-            gh release edit "$GITHUB_REF_NAME" \
-              --title "SCS SDK Rust Crates $GITHUB_REF_NAME" \
-              --notes-file release-body.md \
-              --draft
-          elif grep -Fq 'HTTP 404' "$api_output"; then
-            gh release create "$GITHUB_REF_NAME" \
-              --title "SCS SDK Rust Crates $GITHUB_REF_NAME" \
+
+            release_id="$(jq -r .id <<<"$release_json")"
+            jq -n \
+              --arg name "SCS SDK Rust Crates $RELEASE_TAG" \
+              --rawfile body release-body.md \
+              --argjson prerelease "$prerelease" \
+              '{
+                name: $name,
+                body: $body,
+                draft: true,
+                prerelease: $prerelease
+              }' \
+              | gh api --method PATCH \
+                  "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+                  --input - >/dev/null
+          else
+            find_status=$?
+            if [[ "$find_status" -ne 3 ]]; then
+              exit "$find_status"
+            fi
+
+            gh release create "$RELEASE_TAG" \
+              --title "SCS SDK Rust Crates $RELEASE_TAG" \
               --notes-file release-body.md \
               "${release_flags[@]}"
-          else
-            cat "$api_output" >&2
-            exit 1
           fi
 
-          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
 
       - name: Verify remote assets and publish release
         env:
@@ -371,14 +415,45 @@ jobs:
           remote_assets="$(mktemp)"
           find release-assets -maxdepth 1 -type f -exec basename {} \; \
             | LC_ALL=C sort >"$expected_assets"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
-            --jq '.assets[].name' | LC_ALL=C sort >"$remote_assets"
+
+          release_json="$(
+            .release-workflow/scripts/find-github-release.sh --wait \
+              "$GITHUB_REPOSITORY" "$RELEASE_TAG"
+          )"
+          if [[ "$(jq -r .draft <<<"$release_json")" != "true" ]]; then
+            echo "Release $RELEASE_TAG is no longer a draft." >&2
+            exit 1
+          fi
+          jq -r '.assets[].name' <<<"$release_json" \
+            | LC_ALL=C sort >"$remote_assets"
           diff -u "$expected_assets" "$remote_assets"
 
-          publish_flags=(--draft=false)
-          if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
-            publish_flags+=(--prerelease --latest=false)
-          else
-            publish_flags+=(--prerelease=false --latest)
+          release_id="$(jq -r .id <<<"$release_json")"
+          prerelease=false
+          make_latest=true
+          if [[ "${RELEASE_TAG#v}" == *-* ]]; then
+            prerelease=true
+            make_latest=false
           fi
-          gh release edit "$GITHUB_REF_NAME" "${publish_flags[@]}"
+
+          published_release="$(mktemp)"
+          jq -n \
+            --argjson prerelease "$prerelease" \
+            --arg make_latest "$make_latest" \
+            '{
+              draft: false,
+              prerelease: $prerelease,
+              make_latest: $make_latest
+            }' \
+            | gh api --method PATCH \
+                "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+                --input - >"$published_release"
+
+          if ! jq -e \
+            --argjson prerelease "$prerelease" \
+            '.draft == false and .prerelease == $prerelease' \
+            "$published_release" >/dev/null; then
+            echo "GitHub returned an unexpected published release state." >&2
+            cat "$published_release" >&2
+            exit 1
+          fi

@@ -324,6 +324,18 @@ on crates.io are skipped, so a failed workflow can resume without attempting a
 duplicate publication. Newly published dependencies are polled through Cargo's
 registry index before their dependents are published.
 
+If a run fails after an irreversible publication step, keep the existing tag
+fixed and resume the complete workflow from the current default-branch workflow
+definition:
+
+```bash
+gh workflow run release.yml --ref master -f release_tag=v0.1.0
+```
+
+The recovery run still checks out and builds the exact tagged source. Only its
+workflow helpers come from `master`, allowing a CI-only repair without moving a
+tag or attempting a manual duplicate `cargo publish`.
+
 Only after every crate is visible does the workflow prepare a draft GitHub
 Release, upload all assets, compare the remote asset list with the expected
 list, and publish the draft. Stable tags become the latest release; semantic
@@ -344,21 +356,24 @@ mutually exclusive installation fixtures: install at most one of them at a
 time. The Telemetry example may coexist with the selected Input example.
 
 Release archives are covered by `checksums.txt`, which is signed through GitHub
-Actions keyless OIDC with Sigstore cosign. Verify a release with the exact tag
-and workflow identity:
+Actions keyless OIDC with Sigstore cosign. Verify a normal tag-triggered release
+with the exact tag and workflow identity:
 
 ```bash
 TAG=v0.1.0
 
 cosign verify-blob checksums.txt \
-  --signature checksums.txt.sig \
-  --certificate checksums.txt.pem \
+  --bundle checksums.txt.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity \
     "https://github.com/AptS-1547/scs-sdk-crates/.github/workflows/release.yml@refs/tags/$TAG"
 
 sha256sum -c checksums.txt
 ```
+
+A manually resumed release is signed by the default-branch workflow identity
+instead. Use the exact `--certificate-identity` printed in that release's notes;
+for a recovery dispatched from `master`, it ends in `@refs/heads/master`.
 
 On macOS, use `shasum -a 256 -c checksums.txt` for the final hash check.
 

@@ -18,8 +18,7 @@ case "$mode" in
   complete)
     expected+=(
       checksums.txt
-      checksums.txt.pem
-      checksums.txt.sig
+      checksums.txt.sigstore.json
     )
     ;;
   *)

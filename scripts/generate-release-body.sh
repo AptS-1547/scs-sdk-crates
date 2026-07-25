@@ -3,15 +3,19 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+release_source_root="${RELEASE_SOURCE_ROOT:-$repo_root}"
 release_tag="${1:?usage: generate-release-body.sh RELEASE_TAG GENERATED_NOTES OUTPUT_FILE}"
 generated_notes="${2:?usage: generate-release-body.sh RELEASE_TAG GENERATED_NOTES OUTPUT_FILE}"
 output_file="${3:?usage: generate-release-body.sh RELEASE_TAG GENERATED_NOTES OUTPUT_FILE}"
 repository="${GITHUB_REPOSITORY:-AptS-1547/scs-sdk-crates}"
 
-"$repo_root/scripts/check-release-version.sh" "$release_tag"
+# A recovery run may execute this generator from a current default-branch
+# helper checkout while publishing an older immutable tag. Validate the tag
+# against that release checkout, not against the helper checkout's version.
+"$release_source_root/scripts/check-release-version.sh" "$release_tag"
 version="${release_tag#v}"
 base_url="https://github.com/$repository/releases/download/$release_tag"
-workflow_identity="https://github.com/$repository/.github/workflows/release.yml@refs/tags/$release_tag"
+workflow_identity="${COSIGN_CERTIFICATE_IDENTITY:-https://github.com/$repository/.github/workflows/release.yml@refs/tags/$release_tag}"
 
 windows_archive="scs-sdk-crates-$release_tag-windows-x86_64.zip"
 linux_archive="scs-sdk-crates-$release_tag-linux-x86_64-glibc-2.17.tar.gz"
@@ -58,17 +62,15 @@ Telemetry example 可以与选定的 Input example 同时安装。
 
 ## Integrity and provenance / 完整性与来源
 
-Download [\`checksums.txt\`]($base_url/checksums.txt),
-[\`checksums.txt.sig\`]($base_url/checksums.txt.sig), and
-[\`checksums.txt.pem\`]($base_url/checksums.txt.pem), then verify the keyless
-Sigstore signature and archive hashes:
+Download [\`checksums.txt\`]($base_url/checksums.txt) and
+[\`checksums.txt.sigstore.json\`]($base_url/checksums.txt.sigstore.json), then
+verify the keyless Sigstore bundle and archive hashes:
 
-下载以上三个校验文件后，验证 keyless Sigstore 签名和归档哈希：
+下载以上两个校验文件后，验证 keyless Sigstore bundle 和归档哈希：
 
 \`\`\`bash
 cosign verify-blob checksums.txt \\
-  --signature checksums.txt.sig \\
-  --certificate checksums.txt.pem \\
+  --bundle checksums.txt.sigstore.json \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
   --certificate-identity "$workflow_identity"
 

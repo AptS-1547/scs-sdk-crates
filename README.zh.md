@@ -300,6 +300,17 @@ scs-sdk + scs-sdk-sys + scs-sdk-plugin-macros -> scs-sdk-plugin
 因此失败的 workflow 可以续跑，而不会尝试重复发布。新发布的底层依赖会通过 Cargo
 registry index 进行有界轮询，确认可见后才发布依赖它的上层 crate。
 
+如果 workflow 在不可逆的发布步骤之后失败，应保持现有 tag 不动，并使用当前默认分支
+上的 workflow 定义恢复整条发布流程：
+
+```bash
+gh workflow run release.yml --ref master -f release_tag=v0.1.0
+```
+
+恢复任务仍会 checkout 并构建该 tag 对应的精确源码；只有 workflow helper 来自
+`master`。因此可以修复 CI 自身，而不需要移动已发布 tag，也不会手动重复执行
+`cargo publish`。
+
 四个 crate 全部可见后，workflow 才会创建 draft GitHub Release、上传全部资产、比较
 远端资产清单与预期清单，最后把 draft 转为正式 Release。稳定 tag 会成为 latest；
 `v0.2.0-rc.1` 之类的 semantic prerelease tag 会保持 prerelease 状态。
@@ -318,20 +329,23 @@ example 是互斥安装 fixture，同一时间最多安装其中一个；Telemet
 的 Input example 共存。
 
 Release 归档由 `checksums.txt` 覆盖，并通过 GitHub Actions keyless OIDC 使用 Sigstore
-cosign 签名。验证时应使用精确 tag 与 workflow identity：
+cosign 签名。正常由 tag 触发的 Release 应使用精确 tag 与 workflow identity 验证：
 
 ```bash
 TAG=v0.1.0
 
 cosign verify-blob checksums.txt \
-  --signature checksums.txt.sig \
-  --certificate checksums.txt.pem \
+  --bundle checksums.txt.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity \
     "https://github.com/AptS-1547/scs-sdk-crates/.github/workflows/release.yml@refs/tags/$TAG"
 
 sha256sum -c checksums.txt
 ```
+
+手动恢复的 Release 会使用默认分支的 workflow identity 签名。应采用该 Release notes
+中给出的精确 `--certificate-identity`；从 `master` 发起恢复时，其结尾为
+`@refs/heads/master`。
 
 macOS 可用 `shasum -a 256 -c checksums.txt` 完成最后的哈希校验。
 
