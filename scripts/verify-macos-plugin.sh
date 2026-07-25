@@ -36,12 +36,23 @@ fi
 # can resolve rather than accepting names which occur only in strings or debug
 # information. `NM` remains configurable for nonstandard Xcode installations.
 nm_bin="${NM:-nm}"
-defined_external_symbols="$($nm_bin -gjU "$plugin_path")"
+defined_external_symbols="$($nm_bin -gjU "$plugin_path" | LC_ALL=C sort)"
 for symbol in _scs_telemetry_init _scs_telemetry_shutdown; do
   if [[ $'\n'"$defined_external_symbols"$'\n' != *$'\n'"$symbol"$'\n'* ]]; then
     printf 'Missing required external export: %s\n' "${symbol#_}" >&2
     exit 1
   fi
 done
+
+
+# The leading underscore is Mach-O's C-symbol spelling; after accounting for
+# it, the ABI remains the same closed two-function surface as PE and ELF.
+expected_external_symbols="$(
+  printf '%s\n' _scs_telemetry_init _scs_telemetry_shutdown | LC_ALL=C sort
+)"
+if [[ "$defined_external_symbols" != "$expected_external_symbols" ]]; then
+  printf 'Unexpected defined external exports:\n%s\n' "$defined_external_symbols" >&2
+  exit 1
+fi
 
 printf 'Verified macOS x86-64 telemetry plugin: %s\n' "$plugin_path"

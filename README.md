@@ -27,10 +27,13 @@ The current design maintains the following boundaries:
 | **Total channels** | **107** | `channels::ALL` |
 | Configuration IDs | 6 | `configuration::ids::*` and `ids::ALL` |
 | Configuration attributes | 60 | `configuration::attributes::*` and `attributes::ALL` |
-| H-shifter values | 4 | `ShifterType` |
+| Configuration associations | 71 | `configuration::associations::*` and `associations::ALL` |
+| H-shifter values | 4 | `ShifterType::ALL` |
+| Job market values | 5 | `JobMarket::ALL` |
 | Gameplay events | 6 | `gameplay::events::*` and `events::ALL` |
 | Gameplay attributes | 15 | `gameplay::attributes::*` and `attributes::ALL` |
-| Fine offence values | 14 | `FineOffence` |
+| Gameplay associations | 21 | `gameplay::associations::*` and `associations::ALL` |
+| Fine offence values | 14 | `FineOffence::ALL` |
 
 The raw ABI additionally covers:
 
@@ -95,12 +98,33 @@ Raw pointers and foreign ABIs are allowed in this layer because its responsibili
 - `TelemetryApi`, `TelemetrySession`, and the non-escaping `SdkCall` scope;
 - `ScopedLogger` and the closed `LogLevel` enum;
 - complete SDK result-code mapping;
+- distinct `TelemetryApiVersion` and `GameSchemaVersion` types, plus typed
+  `game::ets2::*` and `game::ats::*` schema-history constants projected from
+  the raw headers;
 - `Channel<T>`, `AnyChannel`, and `ChannelFlags`;
 - `Attribute<T>`, `AnyAttribute`, `ConfigurationId`, and `GameplayEventId`;
+- separate `SdkIndex`, `TrailerIndex`, and `TrailerConfigurationId` domains, so
+  an indexed SDK value, a numbered trailer namespace, and the legacy
+  unnumbered `trailer` configuration cannot be silently interchanged;
+- `ConfigurationAttributeAssociation` and `GameplayAttributeAssociation`,
+  with complete catalogs preserving which group or event carries each shared
+  attribute;
+- `GameSchemaAvailability` metadata retained by every built-in channel,
+  configuration, gameplay descriptor, and descriptor association, with
+  separate ETS2 and ATS minima derived from the official SDK 1.0 through 1.14
+  header history;
+- closed `ShifterType`, `JobMarket`, and `FineOffence` string-value catalogs
+  with `ALL`, `COUNT`, `as_str`, `FromStr`, and value-level schema availability;
+- `UnknownStringValue` for allocation-free parsing failure while the generic
+  string APIs retain the original future value for diagnostics;
 - `ValueRef`, which validates a tagged union's tag before reading the corresponding active member;
+- `ValueType` capability metadata, including the official Telemetry API 1.01
+  minimum for signed 64-bit values;
 - Rust-owned geometry values: `FVector`, `DVector`, `Euler`, `FPlacement`, and `DPlacement`;
 - sentinel-array iteration and typed attribute lookup through `NamedValues`;
-- enumerable catalogs for 107 typed channels, 60 configuration attributes, and 15 gameplay attributes.
+- enumerable catalogs for 107 typed channels, 60 configuration attributes, 71
+  configuration associations, 15 gameplay attributes, and 21 gameplay
+  associations.
 
 The high-level `DPlacement` value carries no ABI padding. It can be copied and retained, while the wrapper never reads uninitialized SDK alignment bytes during decoding.
 
@@ -112,13 +136,18 @@ The SDK requires calls back into the game to occur on the main thread and only w
 
 - the `TelemetryPlugin` lifecycle;
 - explicit product identity through required `PluginMetadata`;
+- explicit product requirements through required `PluginCompatibility`;
 - explicit event and channel subscriptions through `PluginContext`;
-- owned `GameInfo` and typed game detection through `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}`;
+- owned `GameInfo`, typed game detection through `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}`, and canonical `minimum_schema_for` / `supports` queries for descriptor, association, and value capabilities;
 - descriptor, SDK index, trailer index, and typed value decoding through `ChannelUpdate`;
-- `TelemetryEvent`, `ConfigurationEvent`, and `GameplayEvent`;
+- `TelemetryEvent`, `ConfigurationEvent`, and `GameplayEvent`, including typed
+  trailer configuration identity plus high-level `shifter_type`, `job_market`,
+  and `fine_offence` value decoders;
 - game information, configuration strings, and gameplay strings as Rust `str`/`String` values;
 - an initialization, reinitialization, and shutdown state machine;
 - reverse transactional rollback after registration failures;
+- game-schema preflight for required and optional descriptors, including the
+  separately versioned numbered multi-trailer namespace;
 - panic containment in callbacks and shutdown;
 - mutex poison recovery;
 - generation-based isolation of callbacks from old sessions;
@@ -133,6 +162,50 @@ The runtime emits product and compatibility identity before product initializati
 [scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
 [scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.0" events=6 channels=8
 ```
+
+API support has one owner: `scs-sdk::TelemetryApi` lists the versions whose
+foreign initialization layouts have audited adapters. The framework consumes
+that result instead of repeating a second version whitelist. A product's
+`PluginCompatibility` is deliberately separate: it declares the oldest API
+capabilities the product needs and a minimum schema for each supported game.
+The runtime accepts later schema minors within the declared major, rejects a
+different major for review, and validates everything before product
+initialization or SDK registration.
+
+The downloadable archive suffix, negotiated Telemetry API, and per-game
+telemetry schema are three different version domains. The official SDK 1.0
+through 1.14 archives establish this mapping:
+
+| SDK archive | Telemetry API `CURRENT` | ETS2 schema `CURRENT` | ATS schema `CURRENT` |
+| --- | --- | --- | --- |
+| 1.0 | 1.00 | 1.05 | - |
+| 1.1 | 1.00 | 1.07 | - |
+| 1.2 | 1.00 | 1.08 | - |
+| 1.3 | 1.00 | 1.09 | - |
+| 1.4 | 1.00 | 1.10 | - |
+| 1.5 | 1.00 | 1.12 | - |
+| 1.6-1.8 | 1.00 | 1.12 | 1.00 |
+| 1.9 | 1.00 | 1.13 | 1.00 |
+| 1.10 | 1.01 | 1.14 | 1.01 |
+| 1.11 | 1.01 | 1.15 | 1.02 |
+| 1.12 | 1.01 | 1.16 | 1.03 |
+| 1.13 | 1.01 | 1.17 | 1.04 |
+| 1.14 | 1.01 | 1.18 | 1.05 |
+
+In particular, the official SDK 1.10 through 1.14
+`scssdk_telemetry.h` files are byte-identical, while their game-specific
+headers continue to add descriptors. The wrapper records those additions on
+`Channel`, `Attribute`, `ConfigurationId`, `GameplayEventId`, and `Event` as
+per-game schema availability. It also records the 71 configuration and 21
+gameplay attribute relationships separately, because an attribute can join a
+second group later than its descriptor first appeared. `FineOffence` retains
+the same distinction at value level. The numbered trailer namespace and
+gameplay payloads share canonical capability constants under
+`game::capabilities` rather than repeating schema numbers across catalogs.
+Required registrations fail locally when the loading schema is too old;
+optional registrations are skipped locally before the SDK sees the unavailable
+name. SCS still decides channel-specific value conversions and may report
+runtime absence. Plugins therefore do not ask users to select an SDK archive.
 
 ### `scs-sdk-plugin-macros`
 
@@ -163,29 +236,46 @@ The passing fixture uses `#![forbid(unsafe_code)]` and undergoes the same source
 A plugin must declare each intended subscription in `initialize`:
 
 ```rust
-use scs_sdk_plugin::sdk::{ChannelFlags, channels};
+use scs_sdk_plugin::sdk::{
+    ChannelFlags, SdkIndex, TelemetryApiVersion, TrailerIndex, channels, game,
+};
 use scs_sdk_plugin::{
-    PluginContext, PluginMetadata, PluginResult, TelemetryEventKind, TelemetryPlugin,
+    Game, GameCompatibility, PluginCompatibility, PluginContext, PluginMetadata,
+    PluginResult, TelemetryEventKind, TelemetryPlugin,
 };
 
 struct Plugin;
+
+static SUPPORTED_GAMES: [GameCompatibility; 1] = [GameCompatibility::new(
+    Game::EuroTruckSimulator2,
+    game::ets2::V1_00,
+)];
 
 impl TelemetryPlugin for Plugin {
     fn metadata(&self) -> PluginMetadata {
         PluginMetadata::new("My Telemetry Plugin", env!("CARGO_PKG_VERSION"))
     }
 
+    fn compatibility(&self) -> PluginCompatibility {
+        PluginCompatibility::new(TelemetryApiVersion::V1_00, &SUPPORTED_GAMES)
+    }
+
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
         context.subscribe_event(TelemetryEventKind::Started)?;
         context.subscribe_event(TelemetryEventKind::FrameEnd)?;
+        context.subscribe_event_optional(TelemetryEventKind::Gameplay)?;
 
         context.subscribe(channels::truck::SPEED)?;
+        context.subscribe_optional(channels::truck::NAVIGATION_SPEED_LIMIT)?;
         context.subscribe_with_flags(
             channels::truck::ENGINE_RPM,
             ChannelFlags::EACH_FRAME,
         )?;
-        context.subscribe_at(channels::truck::WHEEL_ROTATION, 0)?;
-        context.subscribe_trailer(channels::trailer::CONNECTED, 1)?;
+        context.subscribe_at(channels::truck::WHEEL_ROTATION, SdkIndex::ZERO)?;
+        context.subscribe_trailer(
+            channels::trailer::CONNECTED,
+            TrailerIndex::ALL[1],
+        )?;
 
         Ok(())
     }
@@ -199,11 +289,28 @@ The different index concepts remain distinct:
 - `subscribe_trailer(channel, trailer_index)` selects the trailer number encoded in names from `trailer.0.*` through `trailer.9.*`;
 - `subscribe_trailer_at(channel, trailer_index, sdk_index)` selects an indexed channel for a specific trailer;
 - every group has `_with_flags` variants for explicitly selecting delivery flags such as `EACH_FRAME` and `NO_VALUE`;
-- `Channel::requesting<U>()` explicitly selects the value representation requested from the SDK, with final compatibility determined by the game's registration function.
+- every channel index domain has a matching explicit `subscribe*_optional` family; optional declarations tolerate only `NotFound` and `UnsupportedType`, retain their product-side default when skipped, and never weaken malformed-descriptor, duplicate, lifecycle, or other SDK errors;
+- `subscribe_event_optional(event)` skips an event introduced after the negotiated API and tolerates only `Unsupported` or `NotFound` from event registration;
+- `Channel::requesting<U>()` explicitly selects the value representation requested from the SDK. The framework rejects a required representation which postdates the negotiated API before registration (`i64` requires Telemetry API 1.01), while SCS remains authoritative for channel-specific conversions. An optional newer representation is skipped.
+
+`SdkIndex::new` rejects only the scalar `SCS_U32_NIL` sentinel. `TrailerIndex::new`
+validates the official SDK 1.14 range of `0..10`, and `TrailerIndex::ALL`
+provides all ten statically valid values. Configuration callbacks expose
+`TrailerConfigurationId`, preserving the difference between legacy `trailer`
+and numbered `trailer.0`; a legacy identity is not silently rewritten into
+`TrailerIndex::ZERO`.
+
+Enum-like SDK strings use a typed-known/raw-unknown pair of APIs.
+`ConfigurationEvent::shifter_type`, `ConfigurationEvent::job_market`, and
+`GameplayEvent::fine_offence` return a known SDK 1.14 enum when possible. The
+generic `string` and `string_owned` accessors remain available beside them, so
+a future game value is preserved verbatim rather than discarded. The same
+catalog enums implement `FromStr`, and `GameInfo::supports` applies the detected
+game kind and schema to any `GameSchemaAvailability` value.
 
 `TelemetryPlugin::initialize` has no default implementation. If an empty plugin makes no explicit subscriptions, the runtime issues zero event or channel registrations to the SDK. Duplicate subscriptions return `AlreadyRegistered` before calling the SDK, while subscriptions attempted during a callback or shutdown return `NotNow`.
 
-Explicit intent does not push resource management into the product. The runtime commits registrations only after the plugin returns successfully. If any SDK call fails, previously registered items are unregistered in reverse order. Normal shutdown follows the same reverse-order rule.
+Explicit intent does not push resource management into the product. The runtime commits registrations only after the plugin returns successfully. An expected capability absence skips only its optional declaration. Every required failure and every non-capability optional failure rolls the completed prefix back in reverse order. Normal shutdown follows the same reverse-order rule, and committed counts include only registrations which actually succeeded.
 
 ## Example plugin boundary
 
@@ -374,8 +481,8 @@ The script checks:
 
 - PE32+ DLL format;
 - x86-64 architecture;
-- the `scs_telemetry_init` dynamic export;
-- the `scs_telemetry_shutdown` dynamic export.
+- that the PE export tables contain exactly `scs_telemetry_init` and
+  `scs_telemetry_shutdown`, with no additional named or ordinal-only export.
 
 An existing artifact can also be verified independently:
 
@@ -405,8 +512,8 @@ The script checks:
 
 - ELF 64-bit LSB shared-object format;
 - x86-64 architecture;
-- `scs_telemetry_init` in the dynamic symbol table;
-- `scs_telemetry_shutdown` in the dynamic symbol table.
+- that the defined dynamic-export set is exactly `scs_telemetry_init` and
+  `scs_telemetry_shutdown`.
 
 An existing artifact can also be verified independently:
 
@@ -433,8 +540,8 @@ The script checks:
 - Mach-O 64-bit dynamically linked shared-library format;
 - x86-64 architecture;
 - a valid embedded code signature; local and CI builds use an ad-hoc identity;
-- the external `_scs_telemetry_init` symbol used by the Mach-O C ABI;
-- the external `_scs_telemetry_shutdown` symbol used by the Mach-O C ABI.
+- that the defined external-symbol set is exactly `_scs_telemetry_init` and
+  `_scs_telemetry_shutdown`, using Mach-O's leading-underscore C ABI spelling.
 
 The ad-hoc signature gives local builds a verifiable code directory but is not Developer ID signing or notarization. A public release pipeline should replace it with a project-owned Developer ID signature and notarized distribution archive.
 

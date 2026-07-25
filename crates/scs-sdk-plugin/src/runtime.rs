@@ -11,15 +11,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use scs_sdk::{
-    Event, FrameStartRef, SdkCall, SdkError, TelemetryApi, TelemetryApiVersion, TelemetrySession,
-    ValueRef,
+    Event, FrameStartRef, SdkCall, SdkError, SdkIndex, TelemetryApi, TelemetryApiVersion,
+    TelemetrySession, ValueRef,
 };
 use scs_sdk_sys as sys;
 
 use crate::{
-    ChannelUpdate, ConfigurationEvent, GameInfo, GameplayEvent, PluginContext, PluginError,
-    PluginMetadata, PluginResult, SubscriptionSpec, TelemetryEvent, TelemetryEventKind,
-    TelemetryPlugin,
+    ChannelUpdate, ConfigurationEvent, EventSubscriptionSpec, Game, GameInfo, GameplayEvent,
+    PluginCompatibility, PluginContext, PluginError, PluginMetadata, PluginResult,
+    SubscriptionSpec, TelemetryEvent, TelemetryPlugin, telemetry_api_satisfies,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +55,7 @@ struct EventRegistration {
     runtime: &'static Runtime,
     generation: u64,
     event: Event,
+    requirement: crate::SubscriptionRequirement,
     registered: AtomicBool,
 }
 
@@ -63,7 +64,7 @@ struct EventRegistration {
 struct PreparedPlugin {
     plugin: Box<dyn TelemetryPlugin>,
     metadata: PluginMetadata,
-    events: Vec<TelemetryEventKind>,
+    events: Vec<EventSubscriptionSpec>,
     channels: Vec<SubscriptionSpec>,
 }
 
@@ -173,19 +174,17 @@ impl Runtime {
     where
         F: FnOnce() -> Box<dyn TelemetryPlugin>,
     {
-        let api_version = Self::validate_version(TelemetryApiVersion::from_raw(version))?;
+        let requested_version = TelemetryApiVersion::from_raw(version);
 
         // SAFETY: `initialize_inner` inherits the raw initialization pointer
         // contract documented by `Runtime::initialize`.
-        let api =
-            unsafe { TelemetryApi::from_raw(api_version, params) }.map_err(PluginError::from)?;
+        let api = unsafe { TelemetryApi::from_raw(requested_version, params) }
+            .map_err(|error| Self::api_initialization_error(requested_version, error))?;
         let game = GameInfo::new(api.game_name(), api.game_id(), api.game_schema_version());
 
         self.ensure_idle()?;
-        let prepared = Self::prepare_plugin(&api, api_version, &game, factory)?;
+        let prepared = Self::prepare_plugin(&api, &game, factory)?;
         let metadata = prepared.metadata;
-        let event_count = prepared.events.len();
-        let channel_count = prepared.channels.len();
         let generation = self.install_generation(&api, &game, prepared);
 
         let registration_result = api.with_call(|call| self.register_all(call));
@@ -208,6 +207,21 @@ impl Runtime {
             return Err(error);
         }
 
+        let (event_count, channel_count) = {
+            let state = self.lock_state();
+            let events = state
+                .events
+                .iter()
+                .filter(|registration| registration.registered.load(Ordering::Acquire))
+                .count();
+            let channels = state
+                .channels
+                .iter()
+                .filter(|registration| registration.registered.load(Ordering::Acquire))
+                .count();
+            (events, channels)
+        };
+
         api.with_call(|call| {
             let context = PluginContext::callback(call, game);
             context.message(format_args!(
@@ -225,22 +239,114 @@ impl Runtime {
         Ok(())
     }
 
-    fn validate_version(version: TelemetryApiVersion) -> PluginResult<TelemetryApiVersion> {
-        // SDK 1.14 defines 1.00 and 1.01 with the same concrete initialization
-        // structure, so both have an audited adapter. Keep this as an exact
-        // whitelist: a future 1.02 structure must be reviewed and added here
-        // instead of being interpreted as the current layout by numeric range.
-        match version {
-            TelemetryApiVersion::V1_00 | TelemetryApiVersion::V1_01 => Ok(version),
-            _ => Err(PluginError::new(
+    fn api_initialization_error(version: TelemetryApiVersion, error: SdkError) -> PluginError {
+        if error != SdkError::Unsupported {
+            return PluginError::from(error);
+        }
+
+        // TelemetryApi is the sole owner of the audited adapter list. Runtime
+        // formats that list for diagnostics but deliberately does not repeat a
+        // version match of its own, so adding a future adapter cannot leave two
+        // independent compatibility policies behind.
+        let supported_versions = TelemetryApi::SUPPORTED_VERSIONS
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        PluginError::new(
+            error,
+            format!(
+                "unsupported telemetry API {version}, supported versions are {supported_versions}"
+            ),
+        )
+    }
+
+    fn validate_compatibility(
+        compatibility: PluginCompatibility,
+        api_version: TelemetryApiVersion,
+        game: &GameInfo,
+    ) -> PluginResult {
+        let minimum_api = compatibility.minimum_telemetry_api();
+        if !TelemetryApi::supports_version(minimum_api) {
+            return Err(PluginError::new(
+                SdkError::InvalidParameter,
+                format!(
+                    "plugin requires telemetry API {minimum_api}, which has no audited framework adapter"
+                ),
+            ));
+        }
+
+        // A minimum is meaningful only inside one additive API-major family.
+        // A future major may change semantics even if its numeric value is
+        // greater, so it requires a new explicit product declaration.
+        if !telemetry_api_satisfies(api_version, minimum_api) {
+            return Err(PluginError::new(
                 SdkError::Unsupported,
                 format!(
-                    "unsupported telemetry API {version}, supported versions are {} and {}",
-                    TelemetryApiVersion::V1_00,
-                    TelemetryApiVersion::V1_01,
+                    "plugin requires telemetry API {minimum_api} or newer within major {}, negotiated {api_version}",
+                    minimum_api.major(),
                 ),
-            )),
+            ));
         }
+
+        let games = compatibility.games();
+        if games.is_empty() {
+            return Err(PluginError::new(
+                SdkError::InvalidParameter,
+                "plugin compatibility must declare at least one supported game",
+            ));
+        }
+
+        for (position, declared) in games.iter().copied().enumerate() {
+            if declared.game() == Game::Other {
+                return Err(PluginError::new(
+                    SdkError::InvalidParameter,
+                    "plugin compatibility cannot use the ambiguous Game::Other classification",
+                ));
+            }
+            if games[..position]
+                .iter()
+                .any(|previous| previous.game() == declared.game())
+            {
+                return Err(PluginError::new(
+                    SdkError::InvalidParameter,
+                    format!(
+                        "plugin compatibility declares game {:?} more than once",
+                        declared.game(),
+                    ),
+                ));
+            }
+        }
+
+        let Some(declared) = games
+            .iter()
+            .copied()
+            .find(|declared| declared.game() == game.kind())
+        else {
+            return Err(PluginError::new(
+                SdkError::Unsupported,
+                format!(
+                    "plugin does not support game {:?} with id {:?}",
+                    game.kind(),
+                    game.id(),
+                ),
+            ));
+        };
+
+        let minimum_schema = declared.minimum_schema();
+        let actual_schema = game.schema_version();
+        if actual_schema.major() != minimum_schema.major() || actual_schema < minimum_schema {
+            return Err(PluginError::new(
+                SdkError::Unsupported,
+                format!(
+                    "plugin requires {:?} telemetry schema {minimum_schema} or newer within major {}, detected {actual_schema}",
+                    declared.game(),
+                    minimum_schema.major(),
+                ),
+            ));
+        }
+
+        Ok(())
     }
 
     fn ensure_idle(&self) -> PluginResult {
@@ -255,13 +361,16 @@ impl Runtime {
 
     fn prepare_plugin<F>(
         api: &TelemetryApi<'_>,
-        api_version: TelemetryApiVersion,
         game: &GameInfo,
         factory: F,
     ) -> PluginResult<PreparedPlugin>
     where
         F: FnOnce() -> Box<dyn TelemetryPlugin>,
     {
+        // TelemetryApi owns the negotiated version together with the audited
+        // function table. Read it from that canonical session view instead of
+        // threading a second copy through the plugin runtime.
+        let api_version = api.version();
         let mut plugin = factory();
         let metadata = plugin.metadata();
         if metadata.name().trim().is_empty() || metadata.version().trim().is_empty() {
@@ -298,6 +407,15 @@ impl Runtime {
                 game.schema_version(),
             ));
         });
+
+        let compatibility = plugin.compatibility();
+        if let Err(error) = Self::validate_compatibility(compatibility, api_version, game) {
+            api.with_call(|call| {
+                let context = PluginContext::callback(call, game.clone());
+                context.error(format_args!("plugin compatibility rejected: {error}"));
+            });
+            return Err(error);
+        }
 
         let mut events = Vec::new();
         let mut subscriptions = Vec::new();
@@ -338,11 +456,12 @@ impl Runtime {
         state.events = prepared
             .events
             .into_iter()
-            .map(|kind| {
+            .map(|spec| {
                 Arc::new(EventRegistration {
                     runtime: self,
                     generation,
-                    event: kind.sdk_event(),
+                    event: spec.event,
+                    requirement: spec.requirement,
                     registered: AtomicBool::new(false),
                 })
             })
@@ -372,7 +491,21 @@ impl Runtime {
     }
 
     fn register_all(&'static self, call: &SdkCall<'_>) -> PluginResult {
-        let event_count = self.lock_state().events.len();
+        self.register_events(call)?;
+        self.register_channels(call)
+    }
+
+    fn register_events(&'static self, call: &SdkCall<'_>) -> PluginResult {
+        let (event_count, game) = {
+            let state = self.lock_state();
+            let Some(game) = state.game.clone() else {
+                return Err(PluginError::new(
+                    SdkError::NotNow,
+                    "event registration requires an installed game session",
+                ));
+            };
+            (state.events.len(), game)
+        };
         for position in 0..event_count {
             let registration = {
                 let state = self.lock_state();
@@ -390,24 +523,83 @@ impl Runtime {
             let registration_ref = unsafe { &*registration };
             let event = registration_ref.event;
             let event_context = registration.cast_mut().cast::<c_void>();
+
+            let api_version = call.telemetry_api_version();
+            let minimum_api = event.minimum_api_version();
+            if !telemetry_api_satisfies(api_version, minimum_api) {
+                if matches!(
+                    registration_ref.requirement,
+                    crate::SubscriptionRequirement::Optional
+                ) {
+                    continue;
+                }
+                return Err(PluginError::new(
+                    SdkError::Unsupported,
+                    format!(
+                        "registering required event {event:?} requires telemetry API {minimum_api}; negotiated {api_version}"
+                    ),
+                ));
+            }
+
+            let minimum_schema = game.minimum_schema_for(event.availability());
+            let schema_supported = game.supports(event.availability());
+            if !schema_supported {
+                if matches!(
+                    registration_ref.requirement,
+                    crate::SubscriptionRequirement::Optional
+                ) {
+                    continue;
+                }
+                let detail = minimum_schema.map_or_else(
+                    || format!("is not available for {:?}", game.kind()),
+                    |minimum| {
+                        format!(
+                            "requires {:?} telemetry schema {minimum}; detected {}",
+                            game.kind(),
+                            game.schema_version(),
+                        )
+                    },
+                );
+                return Err(PluginError::new(
+                    SdkError::Unsupported,
+                    format!("registering required event {event:?} {detail}"),
+                ));
+            }
+
             // SAFETY: The stable context records its generation, the callback
             // uses the SDK ABI, catches panics, and decodes event data only for
             // the matching event kind.
-            unsafe { call.register_event(event, event_trampoline, event_context) }.map_err(
-                |error| {
-                    PluginError::new(
-                        error,
-                        format!("registering event {event:?} failed: {error}"),
-                    )
-                },
-            )?;
+            if let Err(error) =
+                unsafe { call.register_event(event, event_trampoline, event_context) }
+            {
+                if registration_ref
+                    .requirement
+                    .tolerates_event_registration_error(error)
+                {
+                    continue;
+                }
+                return Err(PluginError::new(
+                    error,
+                    format!("registering event {event:?} failed: {error}"),
+                ));
+            }
 
             registration_ref.registered.store(true, Ordering::Release);
         }
 
-        let channel_count = {
+        Ok(())
+    }
+
+    fn register_channels(&'static self, call: &SdkCall<'_>) -> PluginResult {
+        let (channel_count, game) = {
             let state = self.lock_state();
-            state.channels.len()
+            let Some(game) = state.game.clone() else {
+                return Err(PluginError::new(
+                    SdkError::NotNow,
+                    "channel registration requires an installed game session",
+                ));
+            };
+            (state.channels.len(), game)
         };
         for position in 0..channel_count {
             let registration = {
@@ -426,24 +618,55 @@ impl Runtime {
             // during this serialized SDK initialization call.
             let registration_ref = unsafe { &*registration };
             let context = registration.cast_mut().cast::<c_void>();
+
+            let value_type = registration_ref.spec.channel.value_type();
+            let minimum_api = value_type.minimum_api_version();
+            let api_version = call.telemetry_api_version();
+            if !telemetry_api_satisfies(api_version, minimum_api) {
+                if matches!(
+                    registration_ref.spec.requirement,
+                    crate::SubscriptionRequirement::Optional
+                ) {
+                    continue;
+                }
+                return Err(PluginError::new(
+                    SdkError::Unsupported,
+                    format!(
+                        "registering required channel {:?}, index {:?}, type {value_type:?} requires telemetry API {minimum_api}; negotiated {api_version}",
+                        registration_ref.spec.registered_name, registration_ref.spec.sdk_index,
+                    ),
+                ));
+            }
+
+            if !Self::channel_schema_is_available(&registration_ref.spec, &game)? {
+                continue;
+            }
+
             let result = unsafe {
                 call.register_erased_channel(
                     &registration_ref.spec.registered_name,
                     registration_ref.spec.sdk_index,
-                    registration_ref.spec.channel.value_type(),
+                    value_type,
                     registration_ref.spec.flags,
                     channel_trampoline,
                     context,
                 )
             };
             if let Err(error) = result {
+                if registration_ref
+                    .spec
+                    .requirement
+                    .tolerates_channel_registration_error(error)
+                {
+                    continue;
+                }
                 return Err(PluginError::new(
                     error,
                     format!(
                         "registering channel {:?}, index {:?}, type {:?} failed: {error}",
                         registration_ref.spec.registered_name,
                         registration_ref.spec.sdk_index,
-                        registration_ref.spec.channel.value_type(),
+                        value_type,
                     ),
                 ));
             }
@@ -452,6 +675,51 @@ impl Runtime {
         }
 
         Ok(())
+    }
+
+    /// Applies per-game descriptor history before a foreign channel call.
+    ///
+    /// `Ok(false)` is reserved for an optional capability which the detected
+    /// schema does not expose. A required capability returns a contextual
+    /// `Unsupported` error so the normal initialization rollback path remains
+    /// responsible for every earlier registration.
+    fn channel_schema_is_available(spec: &SubscriptionSpec, game: &GameInfo) -> PluginResult<bool> {
+        let descriptor_minimum = game.minimum_schema_for(spec.channel.availability());
+        let descriptor_supported = game.supports(spec.channel.availability());
+        let trailer_minimum = spec
+            .trailer_index
+            .and_then(|_| game.minimum_schema_for(scs_sdk::game::capabilities::MULTI_TRAILER));
+        let trailer_supported = spec.trailer_index.is_none()
+            || game.supports(scs_sdk::game::capabilities::MULTI_TRAILER);
+        if descriptor_supported && trailer_supported {
+            return Ok(true);
+        }
+        if matches!(spec.requirement, crate::SubscriptionRequirement::Optional) {
+            return Ok(false);
+        }
+
+        let (capability, minimum) = if descriptor_supported {
+            ("numbered multi-trailer namespace", trailer_minimum)
+        } else {
+            ("channel descriptor", descriptor_minimum)
+        };
+        let detail = minimum.map_or_else(
+            || format!("is not available for {:?}", game.kind()),
+            |minimum| {
+                format!(
+                    "requires {:?} telemetry schema {minimum}; detected {}",
+                    game.kind(),
+                    game.schema_version(),
+                )
+            },
+        );
+        Err(PluginError::new(
+            SdkError::Unsupported,
+            format!(
+                "registering required {capability} {:?}, index {:?} {detail}",
+                spec.registered_name, spec.sdk_index,
+            ),
+        ))
     }
 
     /// Shuts down the current runtime from the generated ABI entry point.
@@ -703,7 +971,7 @@ impl Runtime {
         if !active {
             return;
         }
-        if raw_event != registration.event as sys::ScsEvent {
+        if raw_event != registration.event.raw() {
             return;
         }
 
@@ -711,8 +979,11 @@ impl Runtime {
         // direct callback from SCS on the active SDK thread.
         unsafe {
             session.with_call(|call| {
-                let event = match raw_event {
-                    sys::SCS_TELEMETRY_EVENT_FRAME_START => {
+                // `raw_event` was checked against this registration's typed
+                // descriptor above. Decode by that canonical descriptor rather
+                // than maintaining another raw-number-to-event table here.
+                let event = match registration.event {
+                    Event::FrameStart => {
                         // SAFETY: SCS associates a live frame-start structure
                         // with this exact event discriminator.
                         let Some(frame) = FrameStartRef::from_event_info(event_info) else {
@@ -720,10 +991,10 @@ impl Runtime {
                         };
                         TelemetryEvent::FrameStart(frame)
                     }
-                    sys::SCS_TELEMETRY_EVENT_FRAME_END => TelemetryEvent::FrameEnd,
-                    sys::SCS_TELEMETRY_EVENT_PAUSED => TelemetryEvent::Paused,
-                    sys::SCS_TELEMETRY_EVENT_STARTED => TelemetryEvent::Started,
-                    sys::SCS_TELEMETRY_EVENT_CONFIGURATION => {
+                    Event::FrameEnd => TelemetryEvent::FrameEnd,
+                    Event::Paused => TelemetryEvent::Paused,
+                    Event::Started => TelemetryEvent::Started,
+                    Event::Configuration => {
                         // SAFETY: SCS associates a live configuration structure
                         // with this exact event discriminator.
                         let Some(configuration) =
@@ -733,7 +1004,7 @@ impl Runtime {
                         };
                         TelemetryEvent::Configuration(ConfigurationEvent::new(configuration))
                     }
-                    sys::SCS_TELEMETRY_EVENT_GAMEPLAY => {
+                    Event::Gameplay => {
                         // SAFETY: SCS associates a live gameplay structure with
                         // this exact event discriminator.
                         let Some(gameplay) = scs_sdk::GameplayEventRef::from_event_info(event_info)
@@ -742,7 +1013,6 @@ impl Runtime {
                         };
                         TelemetryEvent::Gameplay(GameplayEvent::new(gameplay))
                     }
-                    _ => return,
                 };
 
                 let mut state = self.lock_state();
@@ -791,11 +1061,7 @@ impl Runtime {
         // SAFETY: The SDK callback contract guarantees either a null pointer for
         // `NO_VALUE` or a live tagged value for the duration of this callback.
         let value = unsafe { ValueRef::from_ptr(raw_value) };
-        let index = if callback_index == sys::SCS_U32_NIL {
-            None
-        } else {
-            Some(callback_index)
-        };
+        let index = SdkIndex::new(callback_index);
 
         // SAFETY: This function is called synchronously from the registered SDK
         // channel trampoline while the copied session remains active.
@@ -934,7 +1200,9 @@ mod tests {
         logs: Vec<(sys::ScsLogType, String)>,
         events: Vec<EventRecord>,
         channels: Vec<ChannelRecord>,
+        selective_event_failure: Option<(sys::ScsEvent, sys::ScsResult)>,
         fail_channel_registration: bool,
+        selective_channel_failure: Option<(Vec<u8>, sys::ScsResult)>,
         fail_event_unregistration: bool,
     }
 
@@ -944,7 +1212,9 @@ mod tests {
                 logs: Vec::new(),
                 events: Vec::new(),
                 channels: Vec::new(),
+                selective_event_failure: None,
                 fail_channel_registration: false,
+                selective_channel_failure: None,
                 fail_event_unregistration: false,
             }
         }
@@ -953,7 +1223,9 @@ mod tests {
             self.logs.clear();
             self.events.clear();
             self.channels.clear();
+            self.selective_event_failure = None;
             self.fail_channel_registration = false;
+            self.selective_channel_failure = None;
             self.fail_event_unregistration = false;
         }
     }
@@ -989,7 +1261,13 @@ mod tests {
         callback: sys::ScsTelemetryEventCallback,
         context: sys::ScsContext,
     ) -> sys::ScsResult {
-        harness().events.push(EventRecord {
+        let mut harness = harness();
+        if let Some((failure_event, result)) = harness.selective_event_failure {
+            if failure_event == event {
+                return result;
+            }
+        }
+        harness.events.push(EventRecord {
             event,
             callback,
             context: AtomicPtr::new(context),
@@ -1022,14 +1300,19 @@ mod tests {
         context: sys::ScsContext,
     ) -> sys::ScsResult {
         let mut harness = harness();
+        // SAFETY: The runtime passes a live NUL-terminated registration name
+        // and retains its owning CString until unregistration completes.
+        let name = unsafe { CStr::from_ptr(name) }.to_bytes();
         if harness.fail_channel_registration {
             return sys::SCS_RESULT_UNSUPPORTED_TYPE;
         }
-        // SAFETY: The runtime passes a live NUL-terminated registration name
-        // and retains its owning CString until unregistration completes.
-        let name = unsafe { CStr::from_ptr(name) }.to_bytes().to_vec();
+        if let Some((failure_name, result)) = harness.selective_channel_failure.as_ref() {
+            if failure_name == name {
+                return *result;
+            }
+        }
         harness.channels.push(ChannelRecord {
-            name,
+            name: name.to_vec(),
             index,
             value_type,
             callback,
@@ -1078,6 +1361,7 @@ mod tests {
         channels: AtomicUsize,
         events: AtomicUsize,
         shutdowns: AtomicUsize,
+        api_version: AtomicU32,
         speed_bits: AtomicU32,
         callback_subscription_result: AtomicI32,
     }
@@ -1086,14 +1370,30 @@ mod tests {
         counts: Arc<Counts>,
     }
 
+    static TEST_SUPPORTED_GAMES: [crate::GameCompatibility; 1] = [crate::GameCompatibility::new(
+        Game::EuroTruckSimulator2,
+        scs_sdk::GameSchemaVersion::new(1, 0),
+    )];
+
+    const fn test_compatibility() -> PluginCompatibility {
+        PluginCompatibility::new(TelemetryApiVersion::V1_00, &TEST_SUPPORTED_GAMES)
+    }
+
     impl TelemetryPlugin for TestPlugin {
         fn metadata(&self) -> PluginMetadata {
             PluginMetadata::new("Runtime test plugin", "0.0.0-test")
         }
 
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
         fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
             self.counts.initializes.fetch_add(1, Ordering::Relaxed);
-            context.subscribe_event(TelemetryEventKind::Started)?;
+            self.counts
+                .api_version
+                .store(context.telemetry_api_version().raw(), Ordering::Relaxed);
+            context.subscribe_event(Event::Started)?;
             context.subscribe(channels::truck::SPEED)
         }
 
@@ -1110,7 +1410,7 @@ mod tests {
         fn event(&mut self, context: &mut PluginContext<'_>, event: TelemetryEvent<'_>) {
             if matches!(event, TelemetryEvent::Started) {
                 self.counts.events.fetch_add(1, Ordering::Relaxed);
-                let result = match context.subscribe_event(TelemetryEventKind::FrameEnd) {
+                let result = match context.subscribe_event(Event::FrameEnd) {
                     Ok(()) => sys::SCS_RESULT_OK,
                     Err(error) => error.result().code(),
                 };
@@ -1141,24 +1441,174 @@ mod tests {
 
     #[test]
     fn telemetry_api_negotiation_accepts_only_the_audited_layout() {
-        assert_eq!(
-            Runtime::validate_version(TelemetryApiVersion::V1_00)
-                .expect("1.00 uses an audited initialization layout"),
-            TelemetryApiVersion::V1_00,
+        let future = Runtime::api_initialization_error(
+            TelemetryApiVersion::new(1, 2),
+            SdkError::Unsupported,
         );
-        assert_eq!(
-            Runtime::validate_version(TelemetryApiVersion::V1_01)
-                .expect("1.01 is the audited runtime ABI"),
-            TelemetryApiVersion::V1_01,
-        );
-
-        let future = Runtime::validate_version(TelemetryApiVersion::new(1, 2))
-            .expect_err("future layouts require a dedicated audited adapter");
         assert_eq!(future.result(), SdkError::Unsupported);
         assert_eq!(
             future.message(),
-            "unsupported telemetry API 1.2, supported versions are 1.0 and 1.1",
+            "unsupported telemetry API 1.2, supported versions are 1.0, 1.1",
         );
+    }
+
+    #[test]
+    fn loader_retry_after_an_unsupported_future_api_starts_cleanly() {
+        let _serial_guard = serial_guard();
+        harness().reset();
+
+        let owner = TestRuntimeOwner::new();
+        let runtime = owner.runtime();
+        let factory_calls = Arc::new(AtomicUsize::new(0));
+        let factory_counter = Arc::clone(&factory_calls);
+
+        // SAFETY: An unknown API must be rejected before the intentionally null
+        // parameter pointer is inspected. This models the loader trying a
+        // future version before falling back to the newest audited adapter.
+        let unsupported = unsafe {
+            runtime.initialize(
+                TelemetryApiVersion::new(1, 2).raw(),
+                ptr::null(),
+                move || {
+                    factory_counter.fetch_add(1, Ordering::Relaxed);
+                    Box::new(EmptyPlugin)
+                },
+            )
+        };
+        assert_eq!(unsupported, sys::SCS_RESULT_UNSUPPORTED);
+        assert_eq!(factory_calls.load(Ordering::Relaxed), 0);
+        assert!(harness().events.is_empty());
+        assert!(harness().channels.is_empty());
+
+        assert_eq!(
+            initialize_without_counts_at(runtime, TelemetryApiVersion::V1_01, EmptyPlugin,),
+            sys::SCS_RESULT_OK
+        );
+        runtime.shutdown();
+        harness().reset();
+        drop(owner);
+
+        // API 1.00 remains a directly audited adapter as well, even though a
+        // modern loader normally succeeds on 1.01 before reaching it.
+        let v100_owner = TestRuntimeOwner::new();
+        let v100_runtime = v100_owner.runtime();
+        assert_eq!(
+            initialize_without_counts_at(v100_runtime, TelemetryApiVersion::V1_00, EmptyPlugin,),
+            sys::SCS_RESULT_OK
+        );
+        v100_runtime.shutdown();
+
+        harness().reset();
+        drop(v100_owner);
+    }
+
+    #[test]
+    fn plugin_compatibility_separates_framework_adapters_from_product_requirements() {
+        static ETS2_FROM_1_14: [crate::GameCompatibility; 1] = [crate::GameCompatibility::new(
+            Game::EuroTruckSimulator2,
+            scs_sdk::GameSchemaVersion::new(1, 14),
+        )];
+        static DUPLICATE_ETS2: [crate::GameCompatibility; 2] = [
+            crate::GameCompatibility::new(
+                Game::EuroTruckSimulator2,
+                scs_sdk::GameSchemaVersion::new(1, 0),
+            ),
+            crate::GameCompatibility::new(
+                Game::EuroTruckSimulator2,
+                scs_sdk::GameSchemaVersion::new(1, 14),
+            ),
+        ];
+        static AMBIGUOUS_OTHER: [crate::GameCompatibility; 1] = [crate::GameCompatibility::new(
+            Game::Other,
+            scs_sdk::GameSchemaVersion::new(1, 0),
+        )];
+        static NO_GAMES: [crate::GameCompatibility; 0] = [];
+
+        let current_ets2 = GameInfo::new(
+            c"Euro Truck Simulator 2",
+            c"eut2",
+            scs_sdk::GameSchemaVersion::new(1, 56),
+        );
+        let requirements = PluginCompatibility::new(TelemetryApiVersion::V1_01, &ETS2_FROM_1_14);
+        assert!(
+            Runtime::validate_compatibility(
+                requirements,
+                TelemetryApiVersion::V1_01,
+                &current_ets2,
+            )
+            .is_ok()
+        );
+
+        let old_api = Runtime::validate_compatibility(
+            requirements,
+            TelemetryApiVersion::V1_00,
+            &current_ets2,
+        )
+        .expect_err("product requirements must reject an older negotiated API");
+        assert_eq!(old_api.result(), SdkError::Unsupported);
+
+        let unknown_required_api = Runtime::validate_compatibility(
+            PluginCompatibility::new(TelemetryApiVersion::new(1, 2), &ETS2_FROM_1_14),
+            TelemetryApiVersion::V1_01,
+            &current_ets2,
+        )
+        .expect_err("a product cannot require an API without a framework adapter");
+        assert_eq!(unknown_required_api.result(), SdkError::InvalidParameter);
+
+        let old_schema = GameInfo::new(
+            c"Euro Truck Simulator 2",
+            c"eut2",
+            scs_sdk::GameSchemaVersion::new(1, 13),
+        );
+        let old_schema_error =
+            Runtime::validate_compatibility(requirements, TelemetryApiVersion::V1_01, &old_schema)
+                .expect_err("schema below the product minimum must be rejected");
+        assert_eq!(old_schema_error.result(), SdkError::Unsupported);
+
+        let future_major = GameInfo::new(
+            c"Euro Truck Simulator 2",
+            c"eut2",
+            scs_sdk::GameSchemaVersion::new(2, 0),
+        );
+        assert_eq!(
+            Runtime::validate_compatibility(
+                requirements,
+                TelemetryApiVersion::V1_01,
+                &future_major,
+            )
+            .expect_err("a future schema major requires explicit review")
+            .result(),
+            SdkError::Unsupported,
+        );
+
+        let ats = GameInfo::new(
+            c"American Truck Simulator",
+            c"ats",
+            scs_sdk::GameSchemaVersion::new(1, 5),
+        );
+        assert_eq!(
+            Runtime::validate_compatibility(requirements, TelemetryApiVersion::V1_01, &ats,)
+                .expect_err("undeclared games are not product-compatible")
+                .result(),
+            SdkError::Unsupported,
+        );
+
+        for invalid in [
+            PluginCompatibility::new(TelemetryApiVersion::V1_00, &NO_GAMES),
+            PluginCompatibility::new(TelemetryApiVersion::V1_00, &DUPLICATE_ETS2),
+            PluginCompatibility::new(TelemetryApiVersion::V1_00, &AMBIGUOUS_OTHER),
+        ] {
+            assert_eq!(
+                Runtime::validate_compatibility(
+                    invalid,
+                    TelemetryApiVersion::V1_01,
+                    &current_ets2,
+                )
+                .expect_err("malformed declarations must fail before product initialization")
+                .result(),
+                SdkError::InvalidParameter,
+            );
+        }
     }
 
     fn started_record(first: bool) -> EventInvocation {
@@ -1267,6 +1717,10 @@ mod tests {
 
         assert_eq!(initialize(runtime, &first), sys::SCS_RESULT_OK);
         assert_eq!(first.initializes.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            first.api_version.load(Ordering::Relaxed),
+            sys::SCS_TELEMETRY_VERSION_CURRENT,
+        );
         assert_eq!(harness().events.len(), 1);
         assert_eq!(harness().channels.len(), 1);
         assert_eq!(
@@ -1360,6 +1814,10 @@ mod tests {
             PluginMetadata::new("Empty test plugin", "0.0.0-test")
         }
 
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
         fn initialize(&mut self, _context: &mut PluginContext<'_>) -> PluginResult {
             Ok(())
         }
@@ -1370,6 +1828,10 @@ mod tests {
     impl TelemetryPlugin for InvalidMetadataPlugin {
         fn metadata(&self) -> PluginMetadata {
             PluginMetadata::new("", "")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
         }
 
         fn initialize(&mut self, _context: &mut PluginContext<'_>) -> PluginResult {
@@ -1384,9 +1846,188 @@ mod tests {
             PluginMetadata::new("Duplicate event test plugin", "0.0.0-test")
         }
 
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
         fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
-            context.subscribe_event(TelemetryEventKind::Started)?;
-            context.subscribe_event(TelemetryEventKind::Started)
+            context.subscribe_event(Event::Started)?;
+            context.subscribe_event(Event::Started)
+        }
+    }
+
+    struct GameplayOnV100Plugin;
+
+    impl TelemetryPlugin for GameplayOnV100Plugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Gameplay API guard test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe_event(Event::Gameplay)
+        }
+    }
+
+    struct Signed64OnV100Plugin;
+
+    impl TelemetryPlugin for Signed64OnV100Plugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Signed 64-bit API guard test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe(channels::truck::SPEED.requesting::<i64>())
+        }
+    }
+
+    struct OptionalChannelPlugin;
+
+    impl TelemetryPlugin for OptionalChannelPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Optional channel transaction test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe(channels::truck::SPEED)?;
+            context.subscribe_optional(channels::truck::ENGINE_RPM)?;
+            context.subscribe(channels::truck::ENGINE_GEAR)?;
+            context.subscribe_optional(channels::truck::SPEED.requesting::<i64>())
+        }
+    }
+
+    struct OptionalGameplayPlugin;
+
+    impl TelemetryPlugin for OptionalGameplayPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Optional gameplay event test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe_event(Event::Started)?;
+            context.subscribe_event_optional(Event::Gameplay)?;
+            context.subscribe_event(Event::FrameEnd)
+        }
+    }
+
+    struct RequiredNavigationSchemaPlugin;
+
+    impl TelemetryPlugin for RequiredNavigationSchemaPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Required navigation schema test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe(channels::truck::NAVIGATION_DISTANCE)
+        }
+    }
+
+    struct RequiredGameplaySchemaPlugin;
+
+    impl TelemetryPlugin for RequiredGameplaySchemaPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Required gameplay schema test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe_event(Event::Gameplay)
+        }
+    }
+
+    struct RequiredMultiTrailerSchemaPlugin;
+
+    impl TelemetryPlugin for RequiredMultiTrailerSchemaPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Required multi-trailer schema test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe_trailer(channels::trailer::CONNECTED, scs_sdk::TrailerIndex::ZERO)
+        }
+    }
+
+    struct OptionalSchemaCapabilitiesPlugin;
+
+    impl TelemetryPlugin for OptionalSchemaCapabilitiesPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Optional schema capabilities test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            context.subscribe_event_optional(Event::Gameplay)?;
+            context.subscribe_optional(channels::truck::NAVIGATION_DISTANCE)?;
+            context.subscribe_trailer_optional(
+                channels::trailer::CONNECTED,
+                scs_sdk::TrailerIndex::ZERO,
+            )?;
+            context.subscribe(channels::truck::SPEED)
+        }
+    }
+
+    static ATS_TEST_SUPPORTED_GAMES: [crate::GameCompatibility; 1] =
+        [crate::GameCompatibility::new(
+            Game::AmericanTruckSimulator,
+            scs_sdk::game::ats::V1_00,
+        )];
+
+    const fn ats_test_compatibility() -> PluginCompatibility {
+        PluginCompatibility::new(TelemetryApiVersion::V1_00, &ATS_TEST_SUPPORTED_GAMES)
+    }
+
+    struct AtsAdbluePlugin {
+        requirement: crate::SubscriptionRequirement,
+    }
+
+    impl TelemetryPlugin for AtsAdbluePlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("ATS AdBlue availability test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            ats_test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            match self.requirement {
+                crate::SubscriptionRequirement::Required => {
+                    context.subscribe(channels::truck::ADBLUE)?;
+                }
+                crate::SubscriptionRequirement::Optional => {
+                    context.subscribe_optional(channels::truck::ADBLUE)?;
+                }
+            }
+            context.subscribe(channels::truck::SPEED)
         }
     }
 
@@ -1394,13 +2035,48 @@ mod tests {
     where
         P: TelemetryPlugin,
     {
-        let parameters = parameters();
+        initialize_without_counts_at(runtime, TelemetryApiVersion::CURRENT, plugin)
+    }
+
+    fn initialize_without_counts_at<P>(
+        runtime: &'static Runtime,
+        api_version: TelemetryApiVersion,
+        plugin: P,
+    ) -> sys::ScsResult
+    where
+        P: TelemetryPlugin,
+    {
+        initialize_without_counts_for_game(
+            runtime,
+            api_version,
+            c"Euro Truck Simulator 2",
+            c"eut2",
+            scs_sdk::GameSchemaVersion::new(1, 56),
+            plugin,
+        )
+    }
+
+    fn initialize_without_counts_for_game<P>(
+        runtime: &'static Runtime,
+        api_version: TelemetryApiVersion,
+        game_name: &'static CStr,
+        game_id: &'static CStr,
+        game_schema: scs_sdk::GameSchemaVersion,
+        plugin: P,
+    ) -> sys::ScsResult
+    where
+        P: TelemetryPlugin,
+    {
+        let mut parameters = parameters();
+        parameters.common.game_name = game_name.as_ptr();
+        parameters.common.game_id = game_id.as_ptr();
+        parameters.common.game_version = game_schema.raw();
         // SAFETY: The fake parameter structure remains live throughout this
         // direct initialization call, and the runtime owner provides a stable
         // address for every context created by the framework.
         unsafe {
             runtime.initialize(
-                sys::SCS_TELEMETRY_VERSION_CURRENT,
+                api_version.raw(),
                 ptr::from_ref(&parameters).cast(),
                 move || Box::new(plugin),
             )
@@ -1452,5 +2128,277 @@ mod tests {
         assert!(harness().channels.is_empty());
         harness().reset();
         drop(duplicate_owner);
+    }
+
+    #[test]
+    fn gameplay_subscription_requires_telemetry_api_v101() {
+        let _serial_guard = serial_guard();
+        harness().reset();
+        let runtime_owner = TestRuntimeOwner::new();
+        let result = initialize_without_counts_at(
+            runtime_owner.runtime(),
+            TelemetryApiVersion::V1_00,
+            GameplayOnV100Plugin,
+        );
+
+        assert_eq!(result, sys::SCS_RESULT_UNSUPPORTED);
+        assert!(harness().events.is_empty());
+        assert!(harness().logs.iter().any(|(_, message)| {
+            message.contains("event Gameplay requires telemetry API 1.1, negotiated 1.0")
+        }));
+
+        harness().reset();
+        drop(runtime_owner);
+    }
+
+    #[test]
+    fn signed_64_bit_channel_requests_require_telemetry_api_v101() {
+        let _serial_guard = serial_guard();
+        harness().reset();
+
+        let v100_owner = TestRuntimeOwner::new();
+        let result = initialize_without_counts_at(
+            v100_owner.runtime(),
+            TelemetryApiVersion::V1_00,
+            Signed64OnV100Plugin,
+        );
+        assert_eq!(result, sys::SCS_RESULT_UNSUPPORTED);
+        assert!(harness().channels.is_empty());
+        assert!(harness().logs.iter().any(|(_, message)| {
+            message.contains("requests I64, which requires telemetry API 1.1; negotiated 1.0")
+        }));
+        harness().reset();
+        drop(v100_owner);
+
+        let v101_owner = TestRuntimeOwner::new();
+        let v101_runtime = v101_owner.runtime();
+        assert_eq!(
+            initialize_without_counts_at(
+                v101_runtime,
+                TelemetryApiVersion::V1_01,
+                Signed64OnV100Plugin,
+            ),
+            sys::SCS_RESULT_OK
+        );
+        assert_eq!(harness().channels.len(), 1);
+        assert_eq!(harness().channels[0].value_type, sys::SCS_VALUE_TYPE_S64);
+        v101_runtime.shutdown();
+        assert!(harness().channels.is_empty());
+
+        harness().reset();
+        drop(v101_owner);
+    }
+
+    #[test]
+    fn descriptor_schema_history_gates_required_and_optional_registrations() {
+        let _serial_guard = serial_guard();
+
+        for plugin in [0_u8, 1_u8, 2_u8] {
+            harness().reset();
+            let owner = TestRuntimeOwner::new();
+            let result = match plugin {
+                0 => initialize_without_counts_for_game(
+                    owner.runtime(),
+                    TelemetryApiVersion::V1_01,
+                    c"Euro Truck Simulator 2",
+                    c"eut2",
+                    scs_sdk::game::ets2::V1_11,
+                    RequiredNavigationSchemaPlugin,
+                ),
+                1 => initialize_without_counts_for_game(
+                    owner.runtime(),
+                    TelemetryApiVersion::V1_01,
+                    c"Euro Truck Simulator 2",
+                    c"eut2",
+                    scs_sdk::game::ets2::V1_13,
+                    RequiredGameplaySchemaPlugin,
+                ),
+                _ => initialize_without_counts_for_game(
+                    owner.runtime(),
+                    TelemetryApiVersion::V1_01,
+                    c"Euro Truck Simulator 2",
+                    c"eut2",
+                    scs_sdk::game::ets2::V1_13,
+                    RequiredMultiTrailerSchemaPlugin,
+                ),
+            };
+            assert_eq!(result, sys::SCS_RESULT_UNSUPPORTED);
+            assert!(harness().events.is_empty());
+            assert!(harness().channels.is_empty());
+            harness().reset();
+            drop(owner);
+        }
+
+        let optional_owner = TestRuntimeOwner::new();
+        let optional_runtime = optional_owner.runtime();
+        assert_eq!(
+            initialize_without_counts_for_game(
+                optional_runtime,
+                TelemetryApiVersion::V1_01,
+                c"Euro Truck Simulator 2",
+                c"eut2",
+                scs_sdk::game::ets2::V1_11,
+                OptionalSchemaCapabilitiesPlugin,
+            ),
+            sys::SCS_RESULT_OK,
+        );
+        assert!(harness().events.is_empty());
+        assert_eq!(harness().channels.len(), 1);
+        assert_eq!(harness().channels[0].name, b"truck.speed");
+        optional_runtime.shutdown();
+        assert!(harness().channels.is_empty());
+        harness().reset();
+        drop(optional_owner);
+
+        let required_ats_owner = TestRuntimeOwner::new();
+        assert_eq!(
+            initialize_without_counts_for_game(
+                required_ats_owner.runtime(),
+                TelemetryApiVersion::V1_01,
+                c"American Truck Simulator",
+                c"ats",
+                scs_sdk::game::ats::V1_05,
+                AtsAdbluePlugin {
+                    requirement: crate::SubscriptionRequirement::Required,
+                },
+            ),
+            sys::SCS_RESULT_UNSUPPORTED,
+        );
+        assert!(harness().channels.is_empty());
+        harness().reset();
+        drop(required_ats_owner);
+
+        let optional_ats_owner = TestRuntimeOwner::new();
+        let optional_ats_runtime = optional_ats_owner.runtime();
+        assert_eq!(
+            initialize_without_counts_for_game(
+                optional_ats_runtime,
+                TelemetryApiVersion::V1_01,
+                c"American Truck Simulator",
+                c"ats",
+                scs_sdk::game::ats::V1_05,
+                AtsAdbluePlugin {
+                    requirement: crate::SubscriptionRequirement::Optional,
+                },
+            ),
+            sys::SCS_RESULT_OK,
+        );
+        assert_eq!(harness().channels.len(), 1);
+        assert_eq!(harness().channels[0].name, b"truck.speed");
+        optional_ats_runtime.shutdown();
+        harness().reset();
+        drop(optional_ats_owner);
+    }
+
+    #[test]
+    fn optional_channels_skip_only_expected_capability_failures() {
+        let _serial_guard = serial_guard();
+
+        for tolerated in [sys::SCS_RESULT_NOT_FOUND, sys::SCS_RESULT_UNSUPPORTED_TYPE] {
+            harness().reset();
+            harness().selective_channel_failure = Some((b"truck.engine.rpm".to_vec(), tolerated));
+
+            let owner = TestRuntimeOwner::new();
+            let runtime = owner.runtime();
+            assert_eq!(
+                initialize_without_counts_at(
+                    runtime,
+                    TelemetryApiVersion::V1_00,
+                    OptionalChannelPlugin,
+                ),
+                sys::SCS_RESULT_OK
+            );
+
+            // Both required channels commit across the missing optional RPM
+            // declaration. The optional i64 request is skipped locally because
+            // API 1.00 predates that representation.
+            assert_eq!(harness().channels.len(), 2);
+            assert_eq!(harness().channels[0].name, b"truck.speed");
+            assert_eq!(harness().channels[0].value_type, sys::SCS_VALUE_TYPE_FLOAT);
+            assert_eq!(harness().channels[1].name, b"truck.engine.gear");
+            assert_eq!(harness().channels[1].value_type, sys::SCS_VALUE_TYPE_S32);
+
+            runtime.shutdown();
+            assert!(harness().channels.is_empty());
+            harness().reset();
+            drop(owner);
+        }
+
+        harness().reset();
+        harness().selective_channel_failure =
+            Some((b"truck.engine.rpm".to_vec(), sys::SCS_RESULT_GENERIC_ERROR));
+        let owner = TestRuntimeOwner::new();
+        assert_eq!(
+            initialize_without_counts_at(
+                owner.runtime(),
+                TelemetryApiVersion::V1_00,
+                OptionalChannelPlugin,
+            ),
+            sys::SCS_RESULT_GENERIC_ERROR
+        );
+        assert!(harness().channels.is_empty());
+
+        harness().reset();
+        drop(owner);
+    }
+
+    #[test]
+    fn optional_events_skip_api_and_expected_registration_absence() {
+        let _serial_guard = serial_guard();
+
+        harness().reset();
+        let v100_owner = TestRuntimeOwner::new();
+        let v100_runtime = v100_owner.runtime();
+        assert_eq!(
+            initialize_without_counts_at(
+                v100_runtime,
+                TelemetryApiVersion::V1_00,
+                OptionalGameplayPlugin,
+            ),
+            sys::SCS_RESULT_OK
+        );
+        assert_eq!(harness().events.len(), 2);
+        assert_eq!(harness().events[0].event, Event::Started.raw());
+        assert_eq!(harness().events[1].event, Event::FrameEnd.raw());
+        v100_runtime.shutdown();
+        harness().reset();
+        drop(v100_owner);
+
+        for tolerated in [sys::SCS_RESULT_UNSUPPORTED, sys::SCS_RESULT_NOT_FOUND] {
+            harness().reset();
+            harness().selective_event_failure = Some((Event::Gameplay.raw(), tolerated));
+            let owner = TestRuntimeOwner::new();
+            let runtime = owner.runtime();
+            assert_eq!(
+                initialize_without_counts_at(
+                    runtime,
+                    TelemetryApiVersion::V1_01,
+                    OptionalGameplayPlugin,
+                ),
+                sys::SCS_RESULT_OK
+            );
+            assert_eq!(harness().events.len(), 2);
+            assert_eq!(harness().events[0].event, Event::Started.raw());
+            assert_eq!(harness().events[1].event, Event::FrameEnd.raw());
+            runtime.shutdown();
+            harness().reset();
+            drop(owner);
+        }
+
+        harness().reset();
+        harness().selective_event_failure =
+            Some((Event::Gameplay.raw(), sys::SCS_RESULT_GENERIC_ERROR));
+        let owner = TestRuntimeOwner::new();
+        assert_eq!(
+            initialize_without_counts_at(
+                owner.runtime(),
+                TelemetryApiVersion::V1_01,
+                OptionalGameplayPlugin,
+            ),
+            sys::SCS_RESULT_GENERIC_ERROR
+        );
+        assert!(harness().events.is_empty());
+        harness().reset();
+        drop(owner);
     }
 }

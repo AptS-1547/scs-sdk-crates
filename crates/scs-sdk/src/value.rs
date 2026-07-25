@@ -1,6 +1,7 @@
 use core::ffi::CStr;
+use core::fmt;
 
-use crate::sys;
+use crate::{TelemetryApiVersion, sys};
 
 mod sealed {
     pub trait Sealed {}
@@ -64,6 +65,20 @@ pub struct DPlacement {
 /// string. SCS strings are UTF-8 and remain valid only for the current callback.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StringValue;
+
+/// Error returned when a string is not in one documented SDK value catalog.
+///
+/// The original text remains owned or borrowed by the caller, so this compact
+/// error carries no allocation. Callers which need forward-compatible logging
+/// can report their input unchanged after a failed `FromStr` conversion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UnknownStringValue;
+
+impl fmt::Display for UnknownStringValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("unknown SDK string value")
+    }
+}
 
 impl From<sys::ScsFVector> for FVector {
     fn from(value: sys::ScsFVector) -> Self {
@@ -161,6 +176,32 @@ impl ValueType {
     #[must_use]
     pub const fn raw(self) -> sys::ScsValueType {
         self as sys::ScsValueType
+    }
+
+    /// Oldest Telemetry API which defines this tagged-union representation.
+    ///
+    /// The Telemetry API 1.01 changelog explicitly adds signed 64-bit values.
+    /// Every other value tag exposed by SDK 1.14 belongs to API 1.00. This is
+    /// representation availability, not a promise that every channel supports
+    /// every representation: SCS still performs the channel-specific
+    /// conversion check during registration.
+    #[must_use]
+    pub const fn minimum_api_version(self) -> TelemetryApiVersion {
+        match self {
+            Self::I64 => TelemetryApiVersion::V1_01,
+            Self::Bool
+            | Self::I32
+            | Self::U32
+            | Self::U64
+            | Self::F32
+            | Self::F64
+            | Self::FVector
+            | Self::DVector
+            | Self::Euler
+            | Self::FPlacement
+            | Self::DPlacement
+            | Self::String => TelemetryApiVersion::V1_00,
+        }
     }
 }
 
@@ -405,6 +446,30 @@ impl<'a> ValueRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_64_bit_values_are_the_only_v101_representation() {
+        for value_type in [
+            ValueType::Bool,
+            ValueType::I32,
+            ValueType::U32,
+            ValueType::U64,
+            ValueType::F32,
+            ValueType::F64,
+            ValueType::FVector,
+            ValueType::DVector,
+            ValueType::Euler,
+            ValueType::FPlacement,
+            ValueType::DPlacement,
+            ValueType::String,
+        ] {
+            assert_eq!(value_type.minimum_api_version(), TelemetryApiVersion::V1_00);
+        }
+        assert_eq!(
+            ValueType::I64.minimum_api_version(),
+            TelemetryApiVersion::V1_01
+        );
+    }
 
     #[test]
     fn decodes_only_the_tagged_union_member() {

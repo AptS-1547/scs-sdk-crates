@@ -44,8 +44,9 @@ use std::fmt;
 
 use scs_sdk::{
     AnyChannel, Attribute, Channel, ChannelFlags, ChannelValue, ConfigurationId, ConfigurationRef,
-    Event, FrameStartRef, GameSchemaVersion, GameplayEventId, GameplayEventRef, LogLevel, SdkCall,
-    SdkError, SdkValue, StringValue, ValueRef,
+    FrameStartRef, GameSchemaAvailability, GameSchemaVersion, GameplayEventId, GameplayEventRef,
+    LogLevel, SdkCall, SdkError, SdkIndex, SdkValue, StringValue, TelemetryApiVersion,
+    TrailerConfigurationId, TrailerIndex, ValueRef,
 };
 
 /// Typed descriptor and value layer used when implementing plugin hooks.
@@ -55,8 +56,37 @@ use scs_sdk::{
 pub use scs_sdk as sdk;
 pub use scs_sdk_plugin_macros::export_plugin;
 
+/// Application-facing name for the canonical [`sdk::Event`] descriptor.
+///
+/// This is a re-export rather than a framework-owned mirror enum. Event
+/// identifiers and their minimum Telemetry API versions belong to the typed
+/// SDK layer; the plugin framework only records explicit subscriptions and
+/// turns the corresponding callbacks into [`TelemetryEvent`] payloads.
+pub use scs_sdk::Event as TelemetryEventKind;
+
 /// Result type returned by plugin initialization and subscription helpers.
 pub type PluginResult<T = ()> = Result<T, PluginError>;
+
+/// Tests one negotiated Telemetry API against a minimum within the same major
+/// compatibility family.
+///
+/// This policy belongs to the framework rather than the version newtype: the
+/// typed SDK preserves raw future versions, while the plugin runtime decides
+/// when a product or requested capability may use them.
+pub(crate) const fn telemetry_api_satisfies(
+    actual: TelemetryApiVersion,
+    minimum: TelemetryApiVersion,
+) -> bool {
+    actual.major() == minimum.major() && actual.raw() >= minimum.raw()
+}
+
+/// Tests an actual game schema against a descriptor minimum within one major.
+pub(crate) const fn game_schema_satisfies(
+    actual: GameSchemaVersion,
+    minimum: GameSchemaVersion,
+) -> bool {
+    actual.major() == minimum.major() && actual.raw() >= minimum.raw()
+}
 
 /// An initialization failure with both an SDK result code and human-readable
 /// context suitable for the game log.
@@ -134,10 +164,17 @@ pub struct GameInfo {
 
 impl GameInfo {
     pub(crate) fn new(name: &CStr, id: &CStr, schema_version: GameSchemaVersion) -> Self {
-        let kind = match id.to_bytes() {
-            b"eut2" => Game::EuroTruckSimulator2,
-            b"ats" => Game::AmericanTruckSimulator,
-            _ => Game::Other,
+        // Compare the exact NUL-terminated identifiers declared by the raw SDK
+        // layer. Keeping the official bytes there avoids a third handwritten
+        // `eut2`/`ats` catalog in the framework while this owned type remains
+        // responsible for application-facing classification.
+        let id_bytes = id.to_bytes_with_nul();
+        let kind = if id_bytes == scs_sdk::sys::SCS_GAME_ID_EUT2 {
+            Game::EuroTruckSimulator2
+        } else if id_bytes == scs_sdk::sys::SCS_GAME_ID_ATS {
+            Game::AmericanTruckSimulator
+        } else {
+            Game::Other
         };
         Self {
             name: name.to_string_lossy().into_owned(),
@@ -175,44 +212,167 @@ impl GameInfo {
     pub const fn schema_version(&self) -> GameSchemaVersion {
         self.schema_version
     }
+
+    /// Resolves one SDK descriptor, association, capability, or value history
+    /// entry for the detected game.
+    ///
+    /// Unknown game IDs return `None`: ETS2 and ATS use independent schema
+    /// histories, so applying either known game's minimum to a third game would
+    /// silently invent compatibility evidence.
+    #[must_use]
+    pub const fn minimum_schema_for(
+        &self,
+        availability: GameSchemaAvailability,
+    ) -> Option<GameSchemaVersion> {
+        match self.kind {
+            Game::EuroTruckSimulator2 => availability.available_since_ets2(),
+            Game::AmericanTruckSimulator => availability.available_since_ats(),
+            Game::Other => None,
+        }
+    }
+
+    /// Whether the detected game schema satisfies one official availability
+    /// record within the same schema-major family.
+    ///
+    /// This is the same policy used by runtime registration preflight. It is
+    /// public so application diagnostics and schema-driven UI can query channel,
+    /// association, and enum-value history without reimplementing version or
+    /// game-kind matching.
+    #[must_use]
+    pub const fn supports(&self, availability: GameSchemaAvailability) -> bool {
+        match self.minimum_schema_for(availability) {
+            Some(minimum) => game_schema_satisfies(self.schema_version, minimum),
+            None => false,
+        }
+    }
+}
+
+/// Minimum telemetry schema required for one supported SCS game.
+///
+/// A schema major identifies the compatibility family. Minor versions are
+/// additive according to the SDK contract, so a plugin accepts the declared
+/// minimum and later minor versions within the same major. A different major
+/// is rejected until the plugin explicitly updates this declaration after
+/// reviewing the changed semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GameCompatibility {
+    game: Game,
+    minimum_schema: GameSchemaVersion,
+}
+
+impl GameCompatibility {
+    /// Declares support for one recognized game and its minimum schema.
+    ///
+    /// Use one entry per game. The runtime rejects duplicate entries and the
+    /// broad `Game::Other` classification because neither would identify one
+    /// unambiguous compatibility policy.
+    #[must_use]
+    pub const fn new(game: Game, minimum_schema: GameSchemaVersion) -> Self {
+        Self {
+            game,
+            minimum_schema,
+        }
+    }
+
+    /// Recognized game governed by this declaration.
+    #[must_use]
+    pub const fn game(self) -> Game {
+        self.game
+    }
+
+    /// Oldest telemetry schema accepted for this game.
+    #[must_use]
+    pub const fn minimum_schema(self) -> GameSchemaVersion {
+        self.minimum_schema
+    }
+}
+
+/// Explicit runtime requirements declared by one product plugin.
+///
+/// The framework and product answer different compatibility questions:
+///
+/// - scs-sdk decides which foreign API layouts it can decode soundly;
+/// - this declaration states which decoded API and game capabilities the
+///   product actually needs;
+/// - SCS chooses the concrete API version by calling the exported initializer
+///   from newest to oldest.
+///
+/// Ordinary users therefore install one plugin binary and never select an SDK
+/// distribution or ABI version manually.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PluginCompatibility {
+    minimum_telemetry_api: TelemetryApiVersion,
+    games: &'static [GameCompatibility],
+}
+
+impl PluginCompatibility {
+    /// Creates an explicit product compatibility declaration.
+    ///
+    /// The games slice must contain at least one recognized game, must not
+    /// contain duplicate game entries, and must not use `Game::Other`. These
+    /// invariants are checked before product initialization so a malformed
+    /// declaration never reaches SDK registration.
+    #[must_use]
+    pub const fn new(
+        minimum_telemetry_api: TelemetryApiVersion,
+        games: &'static [GameCompatibility],
+    ) -> Self {
+        Self {
+            minimum_telemetry_api,
+            games,
+        }
+    }
+
+    /// Oldest Telemetry API whose capabilities the product requires.
+    #[must_use]
+    pub const fn minimum_telemetry_api(self) -> TelemetryApiVersion {
+        self.minimum_telemetry_api
+    }
+
+    /// Per-game schema requirements accepted by the product.
+    #[must_use]
+    pub const fn games(self) -> &'static [GameCompatibility] {
+        self.games
+    }
+}
+
+/// Whether absence of one channel invalidates the complete plugin transaction.
+///
+/// This remains internal because application code expresses the policy through
+/// the explicit `subscribe*` and `subscribe_optional*` method families rather
+/// than constructing an abstract options object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SubscriptionRequirement {
+    Required,
+    Optional,
+}
+
+impl SubscriptionRequirement {
+    pub(crate) const fn tolerates_channel_registration_error(self, error: SdkError) -> bool {
+        matches!(self, Self::Optional)
+            && matches!(error, SdkError::NotFound | SdkError::UnsupportedType)
+    }
+
+    pub(crate) const fn tolerates_event_registration_error(self, error: SdkError) -> bool {
+        matches!(self, Self::Optional)
+            && matches!(error, SdkError::Unsupported | SdkError::NotFound)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EventSubscriptionSpec {
+    pub(crate) event: TelemetryEventKind,
+    pub(crate) requirement: SubscriptionRequirement,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct SubscriptionSpec {
     pub(crate) channel: AnyChannel,
     pub(crate) registered_name: CString,
-    pub(crate) sdk_index: Option<u32>,
-    pub(crate) trailer_index: Option<u32>,
+    pub(crate) sdk_index: Option<SdkIndex>,
+    pub(crate) trailer_index: Option<TrailerIndex>,
     pub(crate) flags: ChannelFlags,
-}
-
-/// Event capability which a plugin may explicitly request during initialization.
-///
-/// This descriptor is intentionally separate from [`TelemetryEvent`]. A kind
-/// represents registration intent and contains no borrowed callback payload;
-/// `TelemetryEvent` represents one actual invocation after the runtime has
-/// validated and decoded the event-specific SDK data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TelemetryEventKind {
-    FrameStart,
-    FrameEnd,
-    Paused,
-    Started,
-    Configuration,
-    Gameplay,
-}
-
-impl TelemetryEventKind {
-    pub(crate) const fn sdk_event(self) -> Event {
-        match self {
-            Self::FrameStart => Event::FrameStart,
-            Self::FrameEnd => Event::FrameEnd,
-            Self::Paused => Event::Paused,
-            Self::Started => Event::Started,
-            Self::Configuration => Event::Configuration,
-            Self::Gameplay => Event::Gameplay,
-        }
-    }
+    pub(crate) requirement: SubscriptionRequirement,
 }
 
 /// Safe capabilities available while the framework calls plugin code.
@@ -223,7 +383,7 @@ impl TelemetryEventKind {
 pub struct PluginContext<'scope> {
     call: &'scope SdkCall<'scope>,
     game: GameInfo,
-    events: Option<&'scope mut Vec<TelemetryEventKind>>,
+    events: Option<&'scope mut Vec<EventSubscriptionSpec>>,
     subscriptions: Option<&'scope mut Vec<SubscriptionSpec>>,
 }
 
@@ -231,7 +391,7 @@ impl<'scope> PluginContext<'scope> {
     pub(crate) fn initializing(
         call: &'scope SdkCall<'scope>,
         game: GameInfo,
-        events: &'scope mut Vec<TelemetryEventKind>,
+        events: &'scope mut Vec<EventSubscriptionSpec>,
         subscriptions: &'scope mut Vec<SubscriptionSpec>,
     ) -> Self {
         Self {
@@ -255,6 +415,18 @@ impl<'scope> PluginContext<'scope> {
     #[must_use]
     pub const fn game(&self) -> &GameInfo {
         &self.game
+    }
+
+    /// Telemetry API version selected by the SCS loader for this session.
+    ///
+    /// This is the negotiated runtime ABI, not the SDK archive version and not
+    /// the game-specific telemetry schema returned by `PluginContext::game`.
+    /// Product code normally relies on `TelemetryPlugin::compatibility` for
+    /// mandatory requirements and reads this value only for an explicit
+    /// optional capability branch.
+    #[must_use]
+    pub const fn telemetry_api_version(&self) -> TelemetryApiVersion {
+        self.call.telemetry_api_version()
     }
 
     /// Formats and writes one message to the game log.
@@ -296,21 +468,78 @@ impl<'scope> PluginContext<'scope> {
     ///
     /// Returns [`SdkError::AlreadyRegistered`] when the same event kind was
     /// requested twice, or [`SdkError::NotNow`] when called from a callback or
-    /// shutdown hook instead of initialization.
+    /// shutdown hook instead of initialization. A required event introduced by
+    /// a newer game schema returns [`SdkError::Unsupported`] before foreign
+    /// registration, independently from its Telemetry API requirement.
     pub fn subscribe_event(&mut self, event: TelemetryEventKind) -> PluginResult {
+        self.subscribe_event_with_requirement(event, SubscriptionRequirement::Required)
+    }
+
+    /// Requests delivery of an event when the negotiated API and loading game
+    /// provide it.
+    ///
+    /// An event introduced by a newer API is skipped locally. If SCS reports
+    /// `Unsupported` or `NotFound` while registering it, the remaining required
+    /// transaction continues. Duplicate declarations, wrong lifecycle phase,
+    /// and other SDK failures remain errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::AlreadyRegistered`] for a duplicate event or
+    /// [`SdkError::NotNow`] outside product initialization. A non-capability
+    /// SDK registration error later aborts the complete transaction.
+    pub fn subscribe_event_optional(&mut self, event: TelemetryEventKind) -> PluginResult {
+        self.subscribe_event_with_requirement(event, SubscriptionRequirement::Optional)
+    }
+
+    fn subscribe_event_with_requirement(
+        &mut self,
+        event: TelemetryEventKind,
+        requirement: SubscriptionRequirement,
+    ) -> PluginResult {
+        let api_version = self.telemetry_api_version();
         let Some(events) = self.events.as_deref_mut() else {
             return Err(PluginError::new(
                 SdkError::NotNow,
                 "events may only be subscribed during plugin initialization",
             ));
         };
-        if events.contains(&event) {
+        let minimum_api = event.minimum_api_version();
+        if !telemetry_api_satisfies(api_version, minimum_api)
+            && requirement == SubscriptionRequirement::Required
+        {
+            return Err(PluginError::new(
+                SdkError::Unsupported,
+                format!(
+                    "event {event:?} requires telemetry API {minimum_api}, negotiated {api_version}"
+                ),
+            ));
+        }
+        let minimum_schema = self.game.minimum_schema_for(event.availability());
+        let schema_supported = self.game.supports(event.availability());
+        if !schema_supported && requirement == SubscriptionRequirement::Required {
+            let detail = minimum_schema.map_or_else(
+                || format!("is not available for {:?}", self.game.kind()),
+                |minimum| {
+                    format!(
+                        "requires {:?} telemetry schema {minimum}; detected {}",
+                        self.game.kind(),
+                        self.game.schema_version(),
+                    )
+                },
+            );
+            return Err(PluginError::new(
+                SdkError::Unsupported,
+                format!("event {event:?} {detail}"),
+            ));
+        }
+        if events.iter().any(|candidate| candidate.event == event) {
             return Err(PluginError::new(
                 SdkError::AlreadyRegistered,
                 format!("duplicate event subscription for {event:?}"),
             ));
         }
-        events.push(event);
+        events.push(EventSubscriptionSpec { event, requirement });
         Ok(())
     }
 
@@ -324,7 +553,11 @@ impl<'scope> PluginContext<'scope> {
     ///
     /// Returns [`SdkError::InvalidParameter`] when `channel` is indexed,
     /// [`SdkError::AlreadyRegistered`] for a duplicate subscription, or
-    /// [`SdkError::NotNow`] outside initialization.
+    /// [`SdkError::NotNow`] outside initialization. A requested value
+    /// representation introduced after the negotiated Telemetry API returns
+    /// [`SdkError::Unsupported`] before the SDK registration transaction begins.
+    /// The same result is returned when the built-in descriptor postdates the
+    /// loading game's telemetry schema.
     pub fn subscribe<T: ChannelValue>(&mut self, channel: Channel<T>) -> PluginResult {
         self.subscribe_with_flags(channel, ChannelFlags::NONE)
     }
@@ -339,6 +572,51 @@ impl<'scope> PluginContext<'scope> {
         channel: Channel<T>,
         flags: ChannelFlags,
     ) -> PluginResult {
+        self.subscribe_scalar_with_flags(channel, flags, SubscriptionRequirement::Required)
+    }
+
+    /// Requests a scalar channel when available in the loading game.
+    ///
+    /// Unlike [`PluginContext::subscribe`], absence of the channel or an
+    /// unsupported channel-specific conversion does not abort initialization.
+    /// No callback is delivered for a skipped subscription, so product state
+    /// must retain an explicit default or unavailable representation.
+    ///
+    /// API- and game-schema-level capability checks are also optional: for
+    /// example, an `i64` request is skipped under Telemetry API 1.00, and a
+    /// navigation channel is skipped before ETS2 schema 1.12.
+    /// Invalid descriptor shape, duplicate declarations, and lifecycle misuse
+    /// remain errors because they indicate a malformed plugin declaration.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same descriptor-shape, duplicate, and lifecycle declaration
+    /// errors as [`PluginContext::subscribe`]. Non-capability registration
+    /// failures still abort the complete transaction.
+    pub fn subscribe_optional<T: ChannelValue>(&mut self, channel: Channel<T>) -> PluginResult {
+        self.subscribe_optional_with_flags(channel, ChannelFlags::NONE)
+    }
+
+    /// Requests an optional scalar channel with explicit delivery flags.
+    ///
+    /// # Errors
+    ///
+    /// Uses the declaration validation documented by
+    /// [`PluginContext::subscribe_optional`].
+    pub fn subscribe_optional_with_flags<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_scalar_with_flags(channel, flags, SubscriptionRequirement::Optional)
+    }
+
+    fn subscribe_scalar_with_flags<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        flags: ChannelFlags,
+        requirement: SubscriptionRequirement,
+    ) -> PluginResult {
         if channel.is_indexed() {
             return Err(PluginError::new(
                 SdkError::InvalidParameter,
@@ -351,6 +629,7 @@ impl<'scope> PluginContext<'scope> {
             None,
             None,
             flags,
+            requirement,
         )
     }
 
@@ -366,7 +645,7 @@ impl<'scope> PluginContext<'scope> {
     pub fn subscribe_at<T: ChannelValue>(
         &mut self,
         channel: Channel<T>,
-        index: u32,
+        index: SdkIndex,
     ) -> PluginResult {
         self.subscribe_at_with_flags(channel, index, ChannelFlags::NONE)
     }
@@ -379,8 +658,61 @@ impl<'scope> PluginContext<'scope> {
     pub fn subscribe_at_with_flags<T: ChannelValue>(
         &mut self,
         channel: Channel<T>,
-        index: u32,
+        index: SdkIndex,
         flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_at_with_flags_and_requirement(
+            channel,
+            index,
+            flags,
+            SubscriptionRequirement::Required,
+        )
+    }
+
+    /// Requests one indexed channel member when available.
+    ///
+    /// `NotFound` and `UnsupportedType` from SCS skip this member without
+    /// affecting required registrations. Descriptor-shape, duplicate, index,
+    /// and lifecycle validation remain strict.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same declaration errors as [`PluginContext::subscribe_at`].
+    /// Non-capability registration failures still abort the transaction.
+    pub fn subscribe_at_optional<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        index: SdkIndex,
+    ) -> PluginResult {
+        self.subscribe_at_optional_with_flags(channel, index, ChannelFlags::NONE)
+    }
+
+    /// Requests an optional indexed channel member with delivery flags.
+    ///
+    /// # Errors
+    ///
+    /// Uses the declaration validation documented by
+    /// [`PluginContext::subscribe_at_optional`].
+    pub fn subscribe_at_optional_with_flags<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        index: SdkIndex,
+        flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_at_with_flags_and_requirement(
+            channel,
+            index,
+            flags,
+            SubscriptionRequirement::Optional,
+        )
+    }
+
+    fn subscribe_at_with_flags_and_requirement<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        index: SdkIndex,
+        flags: ChannelFlags,
+        requirement: SubscriptionRequirement,
     ) -> PluginResult {
         if !channel.is_indexed() {
             return Err(PluginError::new(
@@ -397,6 +729,7 @@ impl<'scope> PluginContext<'scope> {
             Some(index),
             None,
             flags,
+            requirement,
         )
     }
 
@@ -410,12 +743,14 @@ impl<'scope> PluginContext<'scope> {
     /// # Errors
     ///
     /// Returns [`SdkError::InvalidParameter`] when the descriptor is not a
-    /// scalar `trailer.*` channel or `trailer_index` is at least
-    /// [`scs_sdk::configuration::MAX_TRAILERS`].
+    /// scalar `trailer.*` channel. [`TrailerIndex`] construction already
+    /// enforces the official `0..10` range. The numbered namespace itself
+    /// requires ETS2 schema 1.14 or ATS schema 1.01, even when the underlying
+    /// backward-compatible `trailer.*` descriptor is older.
     pub fn subscribe_trailer<T: ChannelValue>(
         &mut self,
         channel: Channel<T>,
-        trailer_index: u32,
+        trailer_index: TrailerIndex,
     ) -> PluginResult {
         self.subscribe_trailer_with_flags(channel, trailer_index, ChannelFlags::NONE)
     }
@@ -428,8 +763,62 @@ impl<'scope> PluginContext<'scope> {
     pub fn subscribe_trailer_with_flags<T: ChannelValue>(
         &mut self,
         channel: Channel<T>,
-        trailer_index: u32,
+        trailer_index: TrailerIndex,
         flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_trailer_with_flags_and_requirement(
+            channel,
+            trailer_index,
+            flags,
+            SubscriptionRequirement::Required,
+        )
+    }
+
+    /// Requests one scalar trailer channel when available.
+    ///
+    /// The trailer name is still validated eagerly; the strong index is valid
+    /// by construction. Only SCS `NotFound` and `UnsupportedType` registration
+    /// results, or a value representation newer than the negotiated API, are
+    /// treated as expected absence.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same descriptor, duplicate, and lifecycle declaration errors
+    /// as [`PluginContext::subscribe_trailer`].
+    pub fn subscribe_trailer_optional<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        trailer_index: TrailerIndex,
+    ) -> PluginResult {
+        self.subscribe_trailer_optional_with_flags(channel, trailer_index, ChannelFlags::NONE)
+    }
+
+    /// Requests an optional scalar trailer channel with delivery flags.
+    ///
+    /// # Errors
+    ///
+    /// Uses the declaration validation documented by
+    /// [`PluginContext::subscribe_trailer_optional`].
+    pub fn subscribe_trailer_optional_with_flags<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        trailer_index: TrailerIndex,
+        flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_trailer_with_flags_and_requirement(
+            channel,
+            trailer_index,
+            flags,
+            SubscriptionRequirement::Optional,
+        )
+    }
+
+    fn subscribe_trailer_with_flags_and_requirement<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        trailer_index: TrailerIndex,
+        flags: ChannelFlags,
+        requirement: SubscriptionRequirement,
     ) -> PluginResult {
         if channel.is_indexed() {
             return Err(PluginError::new(
@@ -438,23 +827,31 @@ impl<'scope> PluginContext<'scope> {
             ));
         }
         let name = trailer_channel_name(channel, trailer_index)?;
-        self.push_subscription(channel.erase(), name, None, Some(trailer_index), flags)
+        self.push_subscription(
+            channel.erase(),
+            name,
+            None,
+            Some(trailer_index),
+            flags,
+            requirement,
+        )
     }
 
     /// Subscribes to one SDK-indexed member of an explicit trailer channel.
     ///
-    /// For example, `trailer_index = 1` and `index = 2` select wheel 2 of the
-    /// second trailer. Both values are zero-based.
+    /// For example, trailer index 1 and SDK index 2 select wheel 2 of the second
+    /// trailer. Both strong index domains are zero-based.
     ///
     /// # Errors
     ///
     /// Returns [`SdkError::InvalidParameter`] unless `channel` is an indexed
-    /// `trailer.*` descriptor and the trailer number is in the SDK range.
+    /// `trailer.*` descriptor. The trailer range and scalar sentinel are
+    /// excluded while constructing [`TrailerIndex`] and [`SdkIndex`].
     pub fn subscribe_trailer_at<T: ChannelValue>(
         &mut self,
         channel: Channel<T>,
-        trailer_index: u32,
-        index: u32,
+        trailer_index: TrailerIndex,
+        index: SdkIndex,
     ) -> PluginResult {
         self.subscribe_trailer_at_with_flags(channel, trailer_index, index, ChannelFlags::NONE)
     }
@@ -467,9 +864,71 @@ impl<'scope> PluginContext<'scope> {
     pub fn subscribe_trailer_at_with_flags<T: ChannelValue>(
         &mut self,
         channel: Channel<T>,
-        trailer_index: u32,
-        index: u32,
+        trailer_index: TrailerIndex,
+        index: SdkIndex,
         flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_trailer_at_with_flags_and_requirement(
+            channel,
+            trailer_index,
+            index,
+            flags,
+            SubscriptionRequirement::Required,
+        )
+    }
+
+    /// Requests an indexed member of one trailer channel when available.
+    ///
+    /// Both index domains remain explicit and strictly validated. Expected SDK
+    /// capability absence skips only this declaration.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same descriptor, index, duplicate, and lifecycle declaration
+    /// errors as [`PluginContext::subscribe_trailer_at`].
+    pub fn subscribe_trailer_at_optional<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        trailer_index: TrailerIndex,
+        index: SdkIndex,
+    ) -> PluginResult {
+        self.subscribe_trailer_at_optional_with_flags(
+            channel,
+            trailer_index,
+            index,
+            ChannelFlags::NONE,
+        )
+    }
+
+    /// Requests an optional indexed trailer channel with delivery flags.
+    ///
+    /// # Errors
+    ///
+    /// Uses the declaration validation documented by
+    /// [`PluginContext::subscribe_trailer_at_optional`].
+    pub fn subscribe_trailer_at_optional_with_flags<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        trailer_index: TrailerIndex,
+        index: SdkIndex,
+        flags: ChannelFlags,
+    ) -> PluginResult {
+        self.subscribe_trailer_at_with_flags_and_requirement(
+            channel,
+            trailer_index,
+            index,
+            flags,
+            SubscriptionRequirement::Optional,
+        )
+    }
+
+    fn subscribe_trailer_at_with_flags_and_requirement<T: ChannelValue>(
+        &mut self,
+        channel: Channel<T>,
+        trailer_index: TrailerIndex,
+        index: SdkIndex,
+        flags: ChannelFlags,
+        requirement: SubscriptionRequirement,
     ) -> PluginResult {
         if !channel.is_indexed() {
             return Err(PluginError::new(
@@ -484,6 +943,7 @@ impl<'scope> PluginContext<'scope> {
             Some(index),
             Some(trailer_index),
             flags,
+            requirement,
         )
     }
 
@@ -491,16 +951,64 @@ impl<'scope> PluginContext<'scope> {
         &mut self,
         channel: AnyChannel,
         registered_name: CString,
-        sdk_index: Option<u32>,
-        trailer_index: Option<u32>,
+        sdk_index: Option<SdkIndex>,
+        trailer_index: Option<TrailerIndex>,
         flags: ChannelFlags,
+        requirement: SubscriptionRequirement,
     ) -> PluginResult {
+        let api_version = self.telemetry_api_version();
+        let descriptor_minimum = self.game.minimum_schema_for(channel.availability());
+        let descriptor_supported = self.game.supports(channel.availability());
+        let trailer_minimum = trailer_index.and_then(|_| {
+            self.game
+                .minimum_schema_for(scs_sdk::game::capabilities::MULTI_TRAILER)
+        });
+        let trailer_supported = trailer_index.is_none()
+            || self
+                .game
+                .supports(scs_sdk::game::capabilities::MULTI_TRAILER);
         let Some(subscriptions) = self.subscriptions.as_deref_mut() else {
             return Err(PluginError::new(
                 SdkError::NotNow,
                 "channels may only be subscribed during plugin initialization",
             ));
         };
+
+        let value_type = channel.value_type();
+        let minimum_api = value_type.minimum_api_version();
+        if !telemetry_api_satisfies(api_version, minimum_api)
+            && requirement == SubscriptionRequirement::Required
+        {
+            return Err(PluginError::new(
+                SdkError::Unsupported,
+                format!(
+                    "channel {registered_name:?} requests {value_type:?}, which requires telemetry API {minimum_api}; negotiated {api_version}",
+                ),
+            ));
+        }
+        if (!descriptor_supported || !trailer_supported)
+            && requirement == SubscriptionRequirement::Required
+        {
+            let (capability, minimum) = if descriptor_supported {
+                ("numbered multi-trailer namespace", trailer_minimum)
+            } else {
+                ("channel descriptor", descriptor_minimum)
+            };
+            let detail = minimum.map_or_else(
+                || format!("is not available for {:?}", self.game.kind()),
+                |minimum| {
+                    format!(
+                        "requires {:?} telemetry schema {minimum}; detected {}",
+                        self.game.kind(),
+                        self.game.schema_version(),
+                    )
+                },
+            );
+            return Err(PluginError::new(
+                SdkError::Unsupported,
+                format!("{capability} {registered_name:?} {detail}"),
+            ));
+        }
 
         let duplicate = subscriptions.iter().any(|candidate| {
             candidate.registered_name == registered_name
@@ -520,6 +1028,7 @@ impl<'scope> PluginContext<'scope> {
             sdk_index,
             trailer_index,
             flags,
+            requirement,
         });
         Ok(())
     }
@@ -527,21 +1036,8 @@ impl<'scope> PluginContext<'scope> {
 
 fn trailer_channel_name<T: ChannelValue>(
     channel: Channel<T>,
-    trailer_index: u32,
+    trailer_index: TrailerIndex,
 ) -> PluginResult<CString> {
-    let maximum = u32::try_from(scs_sdk::configuration::MAX_TRAILERS).map_err(|error| {
-        PluginError::new(
-            SdkError::Generic,
-            format!("SDK trailer limit does not fit u32: {error}"),
-        )
-    })?;
-    if trailer_index >= maximum {
-        return Err(PluginError::new(
-            SdkError::InvalidParameter,
-            format!("trailer index {trailer_index} is outside 0..{maximum}"),
-        ));
-    }
-
     let name = channel.name().to_str().map_err(|error| {
         PluginError::new(
             SdkError::InvalidParameter,
@@ -571,8 +1067,8 @@ fn trailer_channel_name<T: ChannelValue>(
 pub struct ChannelUpdate<'a> {
     channel: AnyChannel,
     registered_name: &'a CStr,
-    index: Option<u32>,
-    trailer_index: Option<u32>,
+    index: Option<SdkIndex>,
+    trailer_index: Option<TrailerIndex>,
     flags: ChannelFlags,
     value: Option<ValueRef<'a>>,
 }
@@ -581,8 +1077,8 @@ impl<'a> ChannelUpdate<'a> {
     pub(crate) const fn new(
         channel: AnyChannel,
         registered_name: &'a CStr,
-        index: Option<u32>,
-        trailer_index: Option<u32>,
+        index: Option<SdkIndex>,
+        trailer_index: Option<TrailerIndex>,
         flags: ChannelFlags,
         value: Option<ValueRef<'a>>,
     ) -> Self {
@@ -613,13 +1109,13 @@ impl<'a> ChannelUpdate<'a> {
 
     /// Zero-based SDK array index, or `None` for a scalar channel.
     #[must_use]
-    pub const fn index(self) -> Option<u32> {
+    pub const fn index(self) -> Option<SdkIndex> {
         self.index
     }
 
     /// Zero-based trailer number embedded in the registered name.
     #[must_use]
-    pub const fn trailer_index(self) -> Option<u32> {
+    pub const fn trailer_index(self) -> Option<TrailerIndex> {
         self.trailer_index
     }
 
@@ -675,6 +1171,24 @@ impl<'a> ConfigurationEvent<'a> {
         self.inner.is(id)
     }
 
+    /// Classifies the legacy or numbered trailer configuration identity.
+    #[must_use]
+    pub fn trailer(self) -> Option<TrailerConfigurationId> {
+        self.inner.trailer()
+    }
+
+    /// Returns the numbered trailer index, excluding the legacy alias.
+    #[must_use]
+    pub fn trailer_index(self) -> Option<TrailerIndex> {
+        self.inner.trailer_index()
+    }
+
+    /// Whether this is the legacy unnumbered `trailer` configuration.
+    #[must_use]
+    pub fn is_legacy_trailer(self) -> bool {
+        self.inner.is_legacy_trailer()
+    }
+
     /// Configuration identifier as Rust text.
     #[must_use]
     pub fn id(self) -> Cow<'a, str> {
@@ -700,7 +1214,7 @@ impl<'a> ConfigurationEvent<'a> {
     pub fn get_at<T: SdkValue>(
         self,
         attribute: Attribute<T>,
-        index: u32,
+        index: SdkIndex,
     ) -> Option<T::Decoded<'a>> {
         self.inner.attributes().get_at(attribute, index)
     }
@@ -715,6 +1229,29 @@ impl<'a> ConfigurationEvent<'a> {
     #[must_use]
     pub fn string_owned(self, attribute: Attribute<StringValue>) -> Option<String> {
         self.string(attribute).map(Cow::into_owned)
+    }
+
+    /// Decodes the documented `controls` shifter type as a Rust enum.
+    ///
+    /// `None` covers an absent attribute and a future string which SDK 1.14 did
+    /// not document. Call [`ConfigurationEvent::string`] with
+    /// [`sdk::configuration::attributes::SHIFTER_TYPE`] when the original
+    /// unknown text must be retained for forward-compatible diagnostics.
+    #[must_use]
+    pub fn shifter_type(self) -> Option<sdk::configuration::ShifterType> {
+        let value = self.string(sdk::configuration::attributes::SHIFTER_TYPE)?;
+        value.parse().ok()
+    }
+
+    /// Decodes the documented active-job market as a Rust enum.
+    ///
+    /// Unknown future values remain accessible through the generic string
+    /// accessor instead of being reclassified as one of the known SDK 1.14
+    /// variants.
+    #[must_use]
+    pub fn job_market(self) -> Option<sdk::configuration::JobMarket> {
+        let value = self.string(sdk::configuration::attributes::JOB_MARKET)?;
+        value.parse().ok()
     }
 }
 
@@ -755,7 +1292,7 @@ impl<'a> GameplayEvent<'a> {
     pub fn get_at<T: SdkValue>(
         self,
         attribute: Attribute<T>,
-        index: u32,
+        index: SdkIndex,
     ) -> Option<T::Decoded<'a>> {
         self.inner.attributes().get_at(attribute, index)
     }
@@ -770,6 +1307,17 @@ impl<'a> GameplayEvent<'a> {
     #[must_use]
     pub fn string_owned(self, attribute: Attribute<StringValue>) -> Option<String> {
         self.string(attribute).map(Cow::into_owned)
+    }
+
+    /// Decodes a documented `player.fined` offence value as a Rust enum.
+    ///
+    /// An absent attribute and a future additive offence both return `None`.
+    /// The generic string accessor preserves the original text when callers
+    /// need to distinguish those cases.
+    #[must_use]
+    pub fn fine_offence(self) -> Option<sdk::gameplay::FineOffence> {
+        let value = self.string(sdk::gameplay::attributes::FINE_OFFENCE)?;
+        value.parse().ok()
     }
 }
 
@@ -835,6 +1383,15 @@ pub trait TelemetryPlugin: Send + 'static {
     /// back to an implementation type name or an unrelated workspace package.
     fn metadata(&self) -> PluginMetadata;
 
+    /// Declares the Telemetry API and per-game schema requirements of this
+    /// product.
+    ///
+    /// This method is required rather than defaulting to the widest possible
+    /// range. The runtime validates the declaration before invoking initialize,
+    /// so an incompatible game never reaches product state setup or SDK
+    /// registration.
+    fn compatibility(&self) -> PluginCompatibility;
+
     /// Declares subscriptions and initializes plugin-owned state.
     ///
     /// Returning an error aborts initialization before a successful result is
@@ -873,6 +1430,59 @@ mod tests {
     use scs_sdk::channels;
 
     #[test]
+    fn optional_subscriptions_tolerate_only_capability_absence() {
+        assert!(
+            SubscriptionRequirement::Optional
+                .tolerates_channel_registration_error(SdkError::NotFound)
+        );
+        assert!(
+            SubscriptionRequirement::Optional
+                .tolerates_channel_registration_error(SdkError::UnsupportedType)
+        );
+        for error in [
+            SdkError::Unsupported,
+            SdkError::InvalidParameter,
+            SdkError::AlreadyRegistered,
+            SdkError::NotNow,
+            SdkError::Generic,
+        ] {
+            assert!(
+                !SubscriptionRequirement::Optional.tolerates_channel_registration_error(error),
+                "optional registration unexpectedly tolerated {error}"
+            );
+        }
+        for error in [
+            SdkError::NotFound,
+            SdkError::UnsupportedType,
+            SdkError::Generic,
+        ] {
+            assert!(
+                !SubscriptionRequirement::Required.tolerates_channel_registration_error(error),
+                "required registration unexpectedly tolerated {error}"
+            );
+        }
+
+        for error in [SdkError::Unsupported, SdkError::NotFound] {
+            assert!(
+                SubscriptionRequirement::Optional.tolerates_event_registration_error(error),
+                "optional event registration did not tolerate {error}"
+            );
+        }
+        for error in [
+            SdkError::InvalidParameter,
+            SdkError::AlreadyRegistered,
+            SdkError::UnsupportedType,
+            SdkError::NotNow,
+            SdkError::Generic,
+        ] {
+            assert!(
+                !SubscriptionRequirement::Optional.tolerates_event_registration_error(error),
+                "optional event registration unexpectedly tolerated {error}"
+            );
+        }
+    }
+
+    #[test]
     fn game_info_owns_rust_text_and_classifies_known_ids() {
         let ets2 = GameInfo::new(
             c"Euro Truck Simulator 2",
@@ -883,6 +1493,11 @@ mod tests {
         assert_eq!(ets2.name(), "Euro Truck Simulator 2");
         assert_eq!(ets2.id(), "eut2");
         assert_eq!(ets2.schema_version(), GameSchemaVersion::new(1, 56));
+        assert!(ets2.supports(sdk::game::capabilities::MULTI_TRAILER));
+        assert_eq!(
+            ets2.minimum_schema_for(sdk::game::capabilities::MULTI_TRAILER),
+            Some(sdk::game::ets2::V1_14)
+        );
 
         let ats = GameInfo::new(
             c"American Truck Simulator",
@@ -890,28 +1505,30 @@ mod tests {
             GameSchemaVersion::new(0, 0),
         );
         assert_eq!(ats.kind(), Game::AmericanTruckSimulator);
+        assert!(!ats.supports(channels::truck::ADBLUE.availability()));
 
         let future = GameInfo::new(c"Future Truck", c"future", GameSchemaVersion::new(0, 0));
         assert_eq!(future.kind(), Game::Other);
         assert_eq!(future.id(), "future");
+        assert_eq!(
+            future.minimum_schema_for(sdk::game::capabilities::MULTI_TRAILER),
+            None
+        );
+        assert!(!future.supports(sdk::game::capabilities::MULTI_TRAILER));
     }
 
     #[test]
     fn trailer_names_follow_the_official_zero_based_scheme() {
-        let first = trailer_channel_name(channels::trailer::CONNECTED, 0)
+        let first = trailer_channel_name(channels::trailer::CONNECTED, TrailerIndex::ZERO)
             .expect("first trailer name should be valid");
         assert_eq!(first.as_c_str(), c"trailer.0.connected");
-        let last = trailer_channel_name(channels::trailer::WHEEL_ROTATION, 9)
+        let last_index = TrailerIndex::new(9).expect("index nine is in the SDK range");
+        let last = trailer_channel_name(channels::trailer::WHEEL_ROTATION, last_index)
             .expect("last trailer name should be valid");
         assert_eq!(last.as_c_str(), c"trailer.9.wheel.rotation");
+        assert_eq!(TrailerIndex::new(10), None);
         assert_eq!(
-            trailer_channel_name(channels::trailer::CONNECTED, 10)
-                .expect_err("trailer index ten is outside the SDK limit")
-                .result(),
-            SdkError::InvalidParameter
-        );
-        assert_eq!(
-            trailer_channel_name(channels::truck::SPEED, 0)
+            trailer_channel_name(channels::truck::SPEED, TrailerIndex::ZERO)
                 .expect_err("truck channels must not enter trailer naming")
                 .result(),
             SdkError::InvalidParameter
@@ -941,5 +1558,195 @@ mod tests {
         assert_eq!(update.value(channels::truck::SPEED), Some(42.5));
         assert_eq!(update.value(channels::truck::ENGINE_RPM), None);
         assert_eq!(update.registered_name(), "truck.speed");
+    }
+
+    #[test]
+    fn channel_update_preserves_both_strong_index_domains() {
+        let raw = scs_sdk_sys::ScsValue {
+            type_: scs_sdk_sys::SCS_VALUE_TYPE_FLOAT,
+            padding: scs_sdk_sys::ScsPadding::uninit(),
+            value: scs_sdk_sys::ScsValueData {
+                value_float: scs_sdk_sys::ScsValueFloat { value: 1.25 },
+            },
+        };
+        let value =
+            unsafe { ValueRef::from_ptr(&raw const raw) }.expect("test value should be present");
+        let sdk_index = SdkIndex::new(2).expect("ordinary SDK index");
+        let trailer_index = TrailerIndex::new(1).expect("second trailer");
+        let update = ChannelUpdate::new(
+            channels::trailer::WHEEL_ROTATION.erase(),
+            c"trailer.1.wheel.rotation",
+            Some(sdk_index),
+            Some(trailer_index),
+            ChannelFlags::EACH_FRAME,
+            Some(value),
+        );
+
+        assert_eq!(update.index(), Some(sdk_index));
+        assert_eq!(update.trailer_index(), Some(trailer_index));
+        assert_eq!(update.registered_name(), "trailer.1.wheel.rotation");
+        assert_eq!(update.value(channels::trailer::WHEEL_ROTATION), Some(1.25));
+    }
+
+    #[test]
+    fn high_level_configuration_values_parse_known_and_preserve_unknown_text() {
+        for (raw_market, expected) in [
+            (
+                c"external_contracts",
+                Some(sdk::configuration::JobMarket::ExternalContracts),
+            ),
+            (c"future_market", None),
+        ] {
+            let attributes = [
+                scs_sdk_sys::ScsNamedValue {
+                    name: c"job.market".as_ptr(),
+                    index: scs_sdk_sys::SCS_U32_NIL,
+                    padding: scs_sdk_sys::ScsPadding::uninit(),
+                    value: scs_sdk_sys::ScsValue {
+                        type_: scs_sdk_sys::SCS_VALUE_TYPE_STRING,
+                        padding: scs_sdk_sys::ScsPadding::uninit(),
+                        value: scs_sdk_sys::ScsValueData {
+                            value_string: scs_sdk_sys::ScsValueString {
+                                value: raw_market.as_ptr(),
+                            },
+                        },
+                    },
+                },
+                scs_sdk_sys::ScsNamedValue {
+                    name: std::ptr::null(),
+                    index: 0,
+                    padding: scs_sdk_sys::ScsPadding::uninit(),
+                    value: scs_sdk_sys::ScsValue {
+                        type_: scs_sdk_sys::SCS_VALUE_TYPE_INVALID,
+                        padding: scs_sdk_sys::ScsPadding::uninit(),
+                        value: scs_sdk_sys::ScsValueData {
+                            value_u64: scs_sdk_sys::ScsValueU64 { value: 0 },
+                        },
+                    },
+                },
+            ];
+            let raw = scs_sdk_sys::ScsTelemetryConfiguration {
+                id: c"job".as_ptr(),
+                attributes: attributes.as_ptr(),
+            };
+            let inner = unsafe {
+                ConfigurationRef::from_event_info((&raw const raw).cast::<std::ffi::c_void>())
+            }
+            .expect("configuration fixture");
+            let event = ConfigurationEvent::new(inner);
+
+            assert_eq!(event.job_market(), expected);
+            assert_eq!(
+                event.string(sdk::configuration::attributes::JOB_MARKET),
+                Some(Cow::Borrowed(raw_market.to_str().expect("ASCII fixture")))
+            );
+        }
+    }
+
+    #[test]
+    fn high_level_shifter_values_parse_known_and_preserve_unknown_text() {
+        for (raw_shifter, expected) in [
+            (c"hshifter", Some(sdk::configuration::ShifterType::HShifter)),
+            (c"future_shifter", None),
+        ] {
+            let attributes = [
+                scs_sdk_sys::ScsNamedValue {
+                    name: c"shifter.type".as_ptr(),
+                    index: scs_sdk_sys::SCS_U32_NIL,
+                    padding: scs_sdk_sys::ScsPadding::uninit(),
+                    value: scs_sdk_sys::ScsValue {
+                        type_: scs_sdk_sys::SCS_VALUE_TYPE_STRING,
+                        padding: scs_sdk_sys::ScsPadding::uninit(),
+                        value: scs_sdk_sys::ScsValueData {
+                            value_string: scs_sdk_sys::ScsValueString {
+                                value: raw_shifter.as_ptr(),
+                            },
+                        },
+                    },
+                },
+                scs_sdk_sys::ScsNamedValue {
+                    name: std::ptr::null(),
+                    index: 0,
+                    padding: scs_sdk_sys::ScsPadding::uninit(),
+                    value: scs_sdk_sys::ScsValue {
+                        type_: scs_sdk_sys::SCS_VALUE_TYPE_INVALID,
+                        padding: scs_sdk_sys::ScsPadding::uninit(),
+                        value: scs_sdk_sys::ScsValueData {
+                            value_u64: scs_sdk_sys::ScsValueU64 { value: 0 },
+                        },
+                    },
+                },
+            ];
+            let raw = scs_sdk_sys::ScsTelemetryConfiguration {
+                id: c"controls".as_ptr(),
+                attributes: attributes.as_ptr(),
+            };
+            let inner = unsafe {
+                ConfigurationRef::from_event_info((&raw const raw).cast::<std::ffi::c_void>())
+            }
+            .expect("configuration fixture");
+            let event = ConfigurationEvent::new(inner);
+
+            assert_eq!(event.shifter_type(), expected);
+            assert_eq!(
+                event.string(sdk::configuration::attributes::SHIFTER_TYPE),
+                Some(Cow::Borrowed(raw_shifter.to_str().expect("ASCII fixture")))
+            );
+        }
+    }
+
+    #[test]
+    fn high_level_gameplay_values_parse_known_and_preserve_unknown_text() {
+        for (raw_offence, expected) in [
+            (
+                c"damaged_vehicle_usage",
+                Some(sdk::gameplay::FineOffence::DamagedVehicleUsage),
+            ),
+            (c"future_offence", None),
+        ] {
+            let attributes = [
+                scs_sdk_sys::ScsNamedValue {
+                    name: c"fine.offence".as_ptr(),
+                    index: scs_sdk_sys::SCS_U32_NIL,
+                    padding: scs_sdk_sys::ScsPadding::uninit(),
+                    value: scs_sdk_sys::ScsValue {
+                        type_: scs_sdk_sys::SCS_VALUE_TYPE_STRING,
+                        padding: scs_sdk_sys::ScsPadding::uninit(),
+                        value: scs_sdk_sys::ScsValueData {
+                            value_string: scs_sdk_sys::ScsValueString {
+                                value: raw_offence.as_ptr(),
+                            },
+                        },
+                    },
+                },
+                scs_sdk_sys::ScsNamedValue {
+                    name: std::ptr::null(),
+                    index: 0,
+                    padding: scs_sdk_sys::ScsPadding::uninit(),
+                    value: scs_sdk_sys::ScsValue {
+                        type_: scs_sdk_sys::SCS_VALUE_TYPE_INVALID,
+                        padding: scs_sdk_sys::ScsPadding::uninit(),
+                        value: scs_sdk_sys::ScsValueData {
+                            value_u64: scs_sdk_sys::ScsValueU64 { value: 0 },
+                        },
+                    },
+                },
+            ];
+            let raw = scs_sdk_sys::ScsTelemetryGameplayEvent {
+                id: c"player.fined".as_ptr(),
+                attributes: attributes.as_ptr(),
+            };
+            let inner = unsafe {
+                GameplayEventRef::from_event_info((&raw const raw).cast::<std::ffi::c_void>())
+            }
+            .expect("gameplay fixture");
+            let event = GameplayEvent::new(inner);
+
+            assert_eq!(event.fine_offence(), expected);
+            assert_eq!(
+                event.string(sdk::gameplay::attributes::FINE_OFFENCE),
+                Some(Cow::Borrowed(raw_offence.to_str().expect("ASCII fixture")))
+            );
+        }
     }
 }

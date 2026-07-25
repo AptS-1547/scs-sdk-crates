@@ -1,8 +1,17 @@
 use core::ffi::{CStr, c_void};
 use core::marker::PhantomData;
 
-use crate::{Attribute, ConfigurationId, GameplayEventId, SdkValue, ValueRef, sys};
+use crate::{
+    Attribute, ConfigurationId, GameSchemaAvailability, GameplayEventId, SdkIndex, SdkValue,
+    TelemetryApiVersion, TrailerConfigurationId, TrailerIndex, ValueRef, game, sys,
+};
 
+/// Telemetry event which may be registered with the SCS SDK.
+///
+/// This type is the single typed representation of an SDK event identifier.
+/// Higher framework layers may re-export it under an application-facing name,
+/// but must not mirror its variants in a second enum: doing so would create a
+/// second event catalog which could drift when SCS adds another event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Event {
@@ -12,6 +21,54 @@ pub enum Event {
     Started = sys::SCS_TELEMETRY_EVENT_STARTED,
     Configuration = sys::SCS_TELEMETRY_EVENT_CONFIGURATION,
     Gameplay = sys::SCS_TELEMETRY_EVENT_GAMEPLAY,
+}
+
+impl Event {
+    /// Raw event discriminator passed to SCS registration functions and back
+    /// to the registered callback.
+    #[must_use]
+    pub const fn raw(self) -> sys::ScsEvent {
+        self as sys::ScsEvent
+    }
+
+    /// Oldest Telemetry API which defines this event identifier.
+    ///
+    /// SCS SDK 1.14 documents gameplay events as an API 1.01 addition. The
+    /// other identifiers belong to the original API 1.00 event set. Keeping
+    /// this capability metadata beside the canonical event enum ensures that
+    /// registration policy and the raw numeric identifier cannot acquire
+    /// separate, independently maintained event inventories.
+    #[must_use]
+    pub const fn minimum_api_version(self) -> TelemetryApiVersion {
+        match self {
+            Self::Gameplay => TelemetryApiVersion::V1_01,
+            Self::FrameStart
+            | Self::FrameEnd
+            | Self::Paused
+            | Self::Started
+            | Self::Configuration => TelemetryApiVersion::V1_00,
+        }
+    }
+
+    /// Oldest per-game schema which can emit this SDK event kind.
+    ///
+    /// Gameplay callbacks require both Telemetry API 1.01 and the game schema
+    /// which introduced gameplay events. Keeping those checks separate avoids
+    /// comparing unrelated version domains. All original lifecycle and
+    /// configuration event kinds exist from the first published game schemas.
+    #[must_use]
+    pub const fn availability(self) -> GameSchemaAvailability {
+        match self {
+            Self::Gameplay => game::capabilities::GAMEPLAY_EVENTS,
+            Self::FrameStart
+            | Self::FrameEnd
+            | Self::Paused
+            | Self::Started
+            | Self::Configuration => {
+                GameSchemaAvailability::new(Some(game::ets2::V1_00), Some(game::ats::V1_00))
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -71,11 +128,11 @@ impl<'a> NamedValueRef<'a> {
     }
 
     #[must_use]
-    pub const fn index(self) -> Option<u32> {
+    pub fn index(self) -> Option<SdkIndex> {
         if self.raw.index == sys::SCS_U32_NIL {
             None
         } else {
-            Some(self.raw.index)
+            SdkIndex::new(self.raw.index)
         }
     }
 
@@ -117,7 +174,7 @@ impl<'a> NamedValues<'a> {
 
     /// Finds one indexed attribute by its name and zero-based SDK index.
     #[must_use]
-    pub fn find_at(self, name: &CStr, index: u32) -> Option<NamedValueRef<'a>> {
+    pub fn find_at(self, name: &CStr, index: SdkIndex) -> Option<NamedValueRef<'a>> {
         self.filter(|attribute| attribute.index() == Some(index))
             .find(|attribute| attribute.name() == name)
     }
@@ -136,7 +193,7 @@ impl<'a> NamedValues<'a> {
     pub fn get_at<T: SdkValue>(
         self,
         attribute: Attribute<T>,
-        index: u32,
+        index: SdkIndex,
     ) -> Option<T::Decoded<'a>> {
         if !attribute.is_indexed() {
             return None;
@@ -191,6 +248,46 @@ impl<'a> ConfigurationRef<'a> {
         self.id() == id.name()
     }
 
+    /// Classifies an unnumbered or numbered trailer configuration ID.
+    ///
+    /// Canonical numbered IDs use an unsigned decimal index without leading
+    /// zeroes. Malformed names, custom configuration IDs, and values outside
+    /// the SDK's `0..10` trailer range return `None` rather than being confused
+    /// with the legacy compatibility alias.
+    #[must_use]
+    pub fn trailer(self) -> Option<TrailerConfigurationId> {
+        let id = self.id();
+        if id == crate::configuration::ids::TRAILER.name() {
+            return Some(TrailerConfigurationId::Legacy);
+        }
+        let digits = id.to_bytes().strip_prefix(b"trailer.")?;
+        if digits.is_empty() || (digits.len() > 1 && digits[0] == b'0') {
+            return None;
+        }
+
+        let mut raw = 0_u32;
+        for digit in digits {
+            if !digit.is_ascii_digit() {
+                return None;
+            }
+            raw = raw.checked_mul(10)?.checked_add(u32::from(*digit - b'0'))?;
+        }
+        TrailerIndex::new(raw).map(TrailerConfigurationId::Numbered)
+    }
+
+    /// Returns the numbered trailer index, excluding the legacy `trailer` ID.
+    #[must_use]
+    pub fn trailer_index(self) -> Option<TrailerIndex> {
+        self.trailer()?.index()
+    }
+
+    /// Whether this event uses the legacy unnumbered `trailer` identity.
+    #[must_use]
+    pub fn is_legacy_trailer(self) -> bool {
+        self.trailer()
+            .is_some_and(TrailerConfigurationId::is_legacy)
+    }
+
     #[must_use]
     pub fn attributes(self) -> NamedValues<'a> {
         // SAFETY: The SDK guarantees a terminated attribute array.
@@ -242,6 +339,72 @@ mod tests {
     use super::*;
 
     #[test]
+    fn event_capabilities_follow_the_official_api_history() {
+        assert_eq!(
+            Event::FrameStart.raw(),
+            sys::SCS_TELEMETRY_EVENT_FRAME_START
+        );
+        assert_eq!(Event::FrameEnd.raw(), sys::SCS_TELEMETRY_EVENT_FRAME_END);
+        assert_eq!(Event::Paused.raw(), sys::SCS_TELEMETRY_EVENT_PAUSED);
+        assert_eq!(Event::Started.raw(), sys::SCS_TELEMETRY_EVENT_STARTED);
+        assert_eq!(
+            Event::Configuration.raw(),
+            sys::SCS_TELEMETRY_EVENT_CONFIGURATION
+        );
+        assert_eq!(Event::Gameplay.raw(), sys::SCS_TELEMETRY_EVENT_GAMEPLAY);
+
+        assert_eq!(
+            Event::FrameStart.minimum_api_version(),
+            TelemetryApiVersion::V1_00
+        );
+        assert_eq!(
+            Event::FrameEnd.minimum_api_version(),
+            TelemetryApiVersion::V1_00
+        );
+        assert_eq!(
+            Event::Paused.minimum_api_version(),
+            TelemetryApiVersion::V1_00
+        );
+        assert_eq!(
+            Event::Started.minimum_api_version(),
+            TelemetryApiVersion::V1_00
+        );
+        assert_eq!(
+            Event::Configuration.minimum_api_version(),
+            TelemetryApiVersion::V1_00
+        );
+        assert_eq!(
+            Event::Gameplay.minimum_api_version(),
+            TelemetryApiVersion::V1_01
+        );
+
+        for event in [
+            Event::FrameStart,
+            Event::FrameEnd,
+            Event::Paused,
+            Event::Started,
+            Event::Configuration,
+        ] {
+            assert_eq!(
+                event.availability().available_since_ets2(),
+                Some(game::ets2::V1_00)
+            );
+            assert_eq!(
+                event.availability().available_since_ats(),
+                Some(game::ats::V1_00)
+            );
+        }
+        assert_eq!(
+            Event::Gameplay.availability().available_since_ets2(),
+            Some(game::ets2::V1_14)
+        );
+        assert_eq!(
+            Event::Gameplay.availability().available_since_ats(),
+            Some(game::ats::V1_01)
+        );
+    }
+
+    #[test]
     fn iterates_and_finds_unindexed_attributes() {
         let cargo_name = c"cargo";
         let cargo_value = c"盆栽花朵";
@@ -281,6 +444,102 @@ mod tests {
 
         assert_eq!(cargo.value().as_c_str(), Some(cargo_value));
         assert_eq!(cargo.index(), None);
+    }
+
+    #[test]
+    fn indexed_attribute_lookup_uses_the_strong_sdk_index_domain() {
+        let slot = c"slot.gear";
+        let attributes = [
+            sys::ScsNamedValue {
+                name: slot.as_ptr(),
+                index: 2,
+                padding: sys::ScsPadding::uninit(),
+                value: sys::ScsValue {
+                    type_: sys::SCS_VALUE_TYPE_S32,
+                    padding: sys::ScsPadding::uninit(),
+                    value: sys::ScsValueData {
+                        value_s32: sys::ScsValueS32 { value: 7 },
+                    },
+                },
+            },
+            sys::ScsNamedValue {
+                name: core::ptr::null(),
+                index: 0,
+                padding: sys::ScsPadding::uninit(),
+                value: sys::ScsValue {
+                    type_: sys::SCS_VALUE_TYPE_INVALID,
+                    padding: sys::ScsPadding::uninit(),
+                    value: sys::ScsValueData {
+                        value_u64: sys::ScsValueU64 { value: 0 },
+                    },
+                },
+            },
+        ];
+
+        let values = unsafe { NamedValues::from_ptr(attributes.as_ptr()) };
+        let index = SdkIndex::new(2).expect("ordinary array index");
+        assert_eq!(
+            values
+                .clone()
+                .get_at(crate::configuration::attributes::SLOT_GEAR, index),
+            Some(7)
+        );
+        assert!(values.find(slot).is_none());
+        assert_eq!(SdkIndex::new(sys::SCS_U32_NIL), None);
+    }
+
+    #[test]
+    fn trailer_configuration_ids_require_the_canonical_numbered_form() {
+        let terminator = [sys::ScsNamedValue {
+            name: core::ptr::null(),
+            index: 0,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValue {
+                type_: sys::SCS_VALUE_TYPE_INVALID,
+                padding: sys::ScsPadding::uninit(),
+                value: sys::ScsValueData {
+                    value_u64: sys::ScsValueU64 { value: 0 },
+                },
+            },
+        }];
+
+        for (id, expected) in [
+            (c"trailer", Some(TrailerConfigurationId::Legacy)),
+            (
+                c"trailer.0",
+                Some(TrailerConfigurationId::Numbered(TrailerIndex::ZERO)),
+            ),
+            (
+                c"trailer.9",
+                Some(TrailerConfigurationId::Numbered(
+                    TrailerIndex::new(9).expect("last trailer index"),
+                )),
+            ),
+            (c"trailer.00", None),
+            (c"trailer.01", None),
+            (c"trailer.10", None),
+            (c"trailer.-1", None),
+            (c"trailer.foo", None),
+            (c"trailer.", None),
+            (c"truck", None),
+        ] {
+            let raw = sys::ScsTelemetryConfiguration {
+                id: id.as_ptr(),
+                attributes: terminator.as_ptr(),
+            };
+            let event =
+                unsafe { ConfigurationRef::from_event_info((&raw const raw).cast::<c_void>()) }
+                    .expect("configuration fixture");
+            assert_eq!(event.trailer(), expected, "configuration id {id:?}");
+            assert_eq!(
+                event.trailer_index(),
+                expected.and_then(TrailerConfigurationId::index)
+            );
+            assert_eq!(
+                event.is_legacy_trailer(),
+                expected.is_some_and(TrailerConfigurationId::is_legacy)
+            );
+        }
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub enum LogLevel {
 
 #[derive(Clone, Copy)]
 pub(crate) struct ApiTable {
+    pub(crate) version: TelemetryApiVersion,
     pub(crate) logger: LoggerHandle,
     pub(crate) register_for_event: sys::ScsTelemetryRegisterForEvent,
     pub(crate) unregister_from_event: sys::ScsTelemetryUnregisterFromEvent,
@@ -29,8 +30,9 @@ pub(crate) struct ApiTable {
 }
 
 impl ApiTable {
-    const fn from_raw(raw: &sys::ScsTelemetryInitParamsV101) -> Self {
+    const fn from_raw(version: TelemetryApiVersion, raw: &sys::ScsTelemetryInitParamsV101) -> Self {
         Self {
+            version,
             logger: LoggerHandle(raw.common.log),
             register_for_event: raw.register_for_event,
             unregister_from_event: raw.unregister_from_event,
@@ -97,7 +99,89 @@ pub struct ScopedLogger<'scope> {
     scope: PhantomData<&'scope SdkCall<'scope>>,
 }
 
+/// Initialization-parameter layout selected for one audited API version.
+///
+/// SCS SDK 1.14 defines separate names for the 1.00 and 1.01 parameter types,
+/// but the latter is a typedef of the former. Keeping the layout selection as
+/// an explicit internal enum gives a future API version a mandatory review
+/// point: it must either reuse an audited layout deliberately or add a new
+/// match arm with its own structure before any foreign pointer is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TelemetryInitLayout {
+    V100,
+}
+
+/// One exact mapping from an accepted API version to its audited foreign
+/// initialization layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TelemetryApiAdapter {
+    version: TelemetryApiVersion,
+    layout: TelemetryInitLayout,
+}
+
+/// Sole version-support table for the typed wrapper.
+///
+/// Version discovery and layout selection both derive from these entries. A
+/// future API therefore cannot be advertised without simultaneously choosing
+/// an audited adapter, and runtime code never carries a parallel whitelist.
+const TELEMETRY_API_ADAPTERS: [TelemetryApiAdapter; 2] = [
+    TelemetryApiAdapter {
+        version: TelemetryApiVersion::V1_00,
+        layout: TelemetryInitLayout::V100,
+    },
+    TelemetryApiAdapter {
+        version: TelemetryApiVersion::V1_01,
+        layout: TelemetryInitLayout::V100,
+    },
+];
+
+const fn adapter_versions() -> [TelemetryApiVersion; TELEMETRY_API_ADAPTERS.len()] {
+    let mut versions = [TelemetryApiVersion::from_raw(0); TELEMETRY_API_ADAPTERS.len()];
+    let mut index = 0;
+    while index < TELEMETRY_API_ADAPTERS.len() {
+        versions[index] = TELEMETRY_API_ADAPTERS[index].version;
+        index += 1;
+    }
+    versions
+}
+
+const SUPPORTED_TELEMETRY_API_VERSIONS: [TelemetryApiVersion; TELEMETRY_API_ADAPTERS.len()] =
+    adapter_versions();
+
 impl<'a> TelemetryApi<'a> {
+    /// Telemetry API versions with initialization layouts audited by this crate.
+    ///
+    /// This list describes wrapper capability, not a product plugin's minimum
+    /// requirements. A framework may understand API 1.00 while a particular
+    /// plugin still requires API 1.01 for gameplay events or signed 64-bit
+    /// values.
+    pub const SUPPORTED_VERSIONS: &'static [TelemetryApiVersion] =
+        &SUPPORTED_TELEMETRY_API_VERSIONS;
+
+    /// Returns whether this wrapper has an audited initialization adapter for
+    /// the supplied version.
+    ///
+    /// The check is an exact whitelist. It deliberately does not accept an
+    /// unknown minor version merely because SCS normally uses minor increments
+    /// for additive changes: the initialization structure still needs to be
+    /// compared with the new official header first.
+    #[must_use]
+    pub const fn supports_version(version: TelemetryApiVersion) -> bool {
+        Self::init_layout(version).is_some()
+    }
+
+    const fn init_layout(version: TelemetryApiVersion) -> Option<TelemetryInitLayout> {
+        let mut index = 0;
+        while index < TELEMETRY_API_ADAPTERS.len() {
+            let adapter = TELEMETRY_API_ADAPTERS[index];
+            if adapter.version.raw() == version.raw() {
+                return Some(adapter.layout);
+            }
+            index += 1;
+        }
+        None
+    }
+
     /// Creates a typed view over the initialization parameters supplied by SCS.
     ///
     /// # Safety
@@ -118,20 +202,33 @@ impl<'a> TelemetryApi<'a> {
         version: TelemetryApiVersion,
         params: *const sys::ScsTelemetryInitParams,
     ) -> SdkResult<Self> {
-        // Both versions use the same concrete initialization structure in SDK
-        // 1.14. Keep the whitelist explicit: a future version must add and
-        // audit its own adapter before this code reads the foreign structure.
-        match version {
-            TelemetryApiVersion::V1_00 | TelemetryApiVersion::V1_01 => {}
-            _ => return Err(SdkError::Unsupported),
-        }
-        let raw = unsafe { params.cast::<sys::ScsTelemetryInitParamsV101>().as_ref() }
-            .ok_or(SdkError::InvalidParameter)?;
+        // Select an exact audited layout before inspecting params. Both
+        // versions currently select V100 because the SDK declares V101 as its
+        // typedef. A future layout gets a separate arm rather than falling
+        // through a numeric-range compatibility guess.
+        let Some(layout) = Self::init_layout(version) else {
+            return Err(SdkError::Unsupported);
+        };
+        let raw = match layout {
+            TelemetryInitLayout::V100 => {
+                // SAFETY: The caller guarantees that params matches the
+                // supported version; init_layout establishes that V100 is the
+                // audited concrete structure for that version.
+                unsafe { params.cast::<sys::ScsTelemetryInitParamsV100>().as_ref() }
+                    .ok_or(SdkError::InvalidParameter)?
+            }
+        };
         Ok(Self {
             raw,
-            table: ApiTable::from_raw(raw),
+            table: ApiTable::from_raw(version, raw),
             not_send_sync: PhantomData,
         })
+    }
+
+    /// Telemetry API version represented by this initialized view.
+    #[must_use]
+    pub const fn version(&self) -> TelemetryApiVersion {
+        self.table.version
     }
 
     #[must_use]
@@ -202,6 +299,16 @@ impl TelemetrySession {
 }
 
 impl SdkCall<'_> {
+    /// Telemetry API version negotiated for the current plugin session.
+    ///
+    /// The value travels with the copied function table, so upper layers do
+    /// not need a second runtime field which could drift from the adapter that
+    /// produced this call capability.
+    #[must_use]
+    pub const fn telemetry_api_version(&self) -> TelemetryApiVersion {
+        self.table.version
+    }
+
     #[must_use]
     pub const fn logger(&self) -> ScopedLogger<'_> {
         ScopedLogger {
@@ -231,7 +338,7 @@ impl SdkCall<'_> {
         context: *mut c_void,
     ) -> SdkResult {
         // SAFETY: The caller upholds the SDK callback and context contract.
-        let result = unsafe { (self.table.register_for_event)(event as u32, callback, context) };
+        let result = unsafe { (self.table.register_for_event)(event.raw(), callback, context) };
         SdkError::from_code(result)
     }
 
@@ -248,7 +355,7 @@ impl SdkCall<'_> {
     /// Returns the result reported by the game's unregistration function.
     pub unsafe fn unregister_event(&self, event: Event) -> SdkResult {
         // SAFETY: The caller upholds the SDK call-site restriction.
-        let result = unsafe { (self.table.unregister_from_event)(event as u32) };
+        let result = unsafe { (self.table.unregister_from_event)(event.raw()) };
         SdkError::from_code(result)
     }
 }
@@ -372,6 +479,16 @@ mod tests {
 
     #[test]
     fn unaudited_api_version_is_rejected_before_reading_parameters() {
+        assert_eq!(
+            TelemetryApi::SUPPORTED_VERSIONS,
+            &[TelemetryApiVersion::V1_00, TelemetryApiVersion::V1_01],
+        );
+        assert!(TelemetryApi::supports_version(TelemetryApiVersion::V1_00));
+        assert!(TelemetryApi::supports_version(TelemetryApiVersion::V1_01));
+        assert!(!TelemetryApi::supports_version(TelemetryApiVersion::new(
+            1, 2
+        )));
+
         let result = unsafe {
             TelemetryApi::from_raw(
                 TelemetryApiVersion::new(1, 2),

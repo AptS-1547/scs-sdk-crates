@@ -10,7 +10,11 @@ pub mod ets2 {
     use crate::make_version;
 
     /// Stable game identifier supplied in `scs_sdk_init_params_v100_t::game_id`.
-    pub const GAME_ID: &[u8] = b"eut2\0";
+    ///
+    /// This ergonomic module name aliases the header-shaped raw constant. It
+    /// deliberately does not repeat the byte string, so both public paths stay
+    /// tied to one declaration of the foreign identifier.
+    pub const GAME_ID: &[u8] = crate::SCS_GAME_ID_EUT2;
 
     /// Initial ETS2 telemetry schema.
     pub const VERSION_1_00: u32 = make_version(1, 0);
@@ -60,7 +64,11 @@ pub mod ats {
     use crate::make_version;
 
     /// Stable game identifier supplied in `scs_sdk_init_params_v100_t::game_id`.
-    pub const GAME_ID: &[u8] = b"ats\0";
+    ///
+    /// This ergonomic module name aliases the header-shaped raw constant. It
+    /// deliberately does not repeat the byte string, so both public paths stay
+    /// tied to one declaration of the foreign identifier.
+    pub const GAME_ID: &[u8] = crate::SCS_GAME_ID_ATS;
 
     /// Initial ATS schema, corresponding to ETS2 telemetry version 1.12.
     pub const VERSION_1_00: u32 = make_version(1, 0);
@@ -77,4 +85,15 @@ pub mod ats {
 
     /// Latest ATS telemetry game version declared by SDK 1.14.
     pub const VERSION_CURRENT: u32 = VERSION_1_05;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_game_ids_alias_the_header_shaped_constants() {
+        assert_eq!(ets2::GAME_ID, crate::SCS_GAME_ID_EUT2);
+        assert_eq!(ats::GAME_ID, crate::SCS_GAME_ID_ATS);
+    }
 }

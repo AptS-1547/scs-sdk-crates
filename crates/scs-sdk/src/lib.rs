@@ -18,19 +18,26 @@ pub mod configuration;
 mod descriptor;
 mod error;
 mod event;
+pub mod game;
 pub mod gameplay;
+mod index;
 mod value;
 mod version;
 
 pub use api::{LogLevel, ScopedLogger, SdkCall, TelemetryApi, TelemetrySession};
 pub use channel::{AnyChannel, Channel, ChannelFlags, ChannelValue, channels};
-pub use descriptor::{AnyAttribute, Attribute, ConfigurationId, GameplayEventId};
+pub use descriptor::{
+    AnyAttribute, Attribute, ConfigurationAttributeAssociation, ConfigurationId,
+    GameSchemaAvailability, GameplayAttributeAssociation, GameplayEventId,
+};
 pub use error::{SdkError, SdkResult};
 pub use event::{
     ConfigurationRef, Event, FrameStartRef, GameplayEventRef, NamedValueRef, NamedValues,
 };
+pub use index::{SdkIndex, TrailerConfigurationId, TrailerIndex};
 pub use value::{
-    DPlacement, DVector, Euler, FPlacement, FVector, SdkValue, StringValue, ValueRef, ValueType,
+    DPlacement, DVector, Euler, FPlacement, FVector, SdkValue, StringValue, UnknownStringValue,
+    ValueRef, ValueType,
 };
 pub use version::{GameSchemaVersion, TelemetryApiVersion};
 

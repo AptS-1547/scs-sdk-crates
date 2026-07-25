@@ -39,12 +39,22 @@ fi
 # all strings or the ordinary object symbol table could accept an export name
 # that is present as debug data but unavailable through dlsym(3).
 dynamic_symbols="$($nm_bin -D --defined-only "$plugin_path")"
-symbol_names="$(printf '%s\n' "$dynamic_symbols" | awk '{print $NF}')"
+symbol_names="$(printf '%s\n' "$dynamic_symbols" | awk '{print $NF}' | LC_ALL=C sort)"
 for symbol in scs_telemetry_init scs_telemetry_shutdown; do
   if [[ $'\n'"$symbol_names"$'\n' != *$'\n'"$symbol"$'\n'* ]]; then
     printf 'Missing required dynamic export: %s\n' "$symbol" >&2
     exit 1
   fi
 done
+
+
+# Keep the external ABI surface closed. A presence-only check would accept a
+# third accidentally exported Rust or application symbol even though the SCS
+# loader contract consists solely of init and shutdown.
+expected_symbol_names="$(printf '%s\n' scs_telemetry_init scs_telemetry_shutdown | LC_ALL=C sort)"
+if [[ "$symbol_names" != "$expected_symbol_names" ]]; then
+  printf 'Unexpected defined dynamic exports:\n%s\n' "$symbol_names" >&2
+  exit 1
+fi
 
 printf 'Verified Linux x86-64 telemetry plugin: %s\n' "$plugin_path"

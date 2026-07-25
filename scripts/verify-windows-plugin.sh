@@ -24,4 +24,28 @@ for symbol in scs_telemetry_init scs_telemetry_shutdown; do
   fi
 done
 
+# A telemetry plugin has exactly the two loader entry points. Merely finding
+# both names would miss an accidental third export from macro hygiene or an
+# application-owned ABI function. PE records ordinal-only and named entries in
+# separate counts, so validate both tables before accepting the artifact.
+export_address_count="$({ printf '%s\n' "$export_table" | awk '
+  /^[[:space:]]*Export Address Table[[:space:]]+[[:xdigit:]]+[[:space:]]*$/ {
+    print $NF
+    exit
+  }
+'; } || true)"
+named_export_count="$({ printf '%s\n' "$export_table" | awk '
+  /^[[:space:]]*\[Name Pointer\/Ordinal\] Table[[:space:]]+[[:xdigit:]]+[[:space:]]*$/ {
+    print $NF
+    exit
+  }
+'; } || true)"
+if [[ -z "$export_address_count" || -z "$named_export_count"
+  || $((16#$export_address_count)) -ne 2
+  || $((16#$named_export_count)) -ne 2 ]]; then
+  printf 'Unexpected PE export count: addresses=%s names=%s\n' \
+    "${export_address_count:-missing}" "${named_export_count:-missing}" >&2
+  exit 1
+fi
+
 printf 'Verified Windows x64 telemetry plugin: %s\n' "$plugin_path"

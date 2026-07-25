@@ -19,11 +19,13 @@
     )
 )]
 
-use scs_sdk_plugin::sdk::{DPlacement, channels, configuration, gameplay};
+use scs_sdk_plugin::sdk::{
+    DPlacement, TelemetryApiVersion, channels, configuration, game, gameplay,
+};
 use scs_sdk_plugin::{
-    ChannelUpdate, ConfigurationEvent, Game, GameplayEvent, PluginContext, PluginError,
-    PluginMetadata, PluginResult, TelemetryEvent, TelemetryEventKind, TelemetryPlugin,
-    export_plugin,
+    ChannelUpdate, ConfigurationEvent, Game, GameCompatibility, GameplayEvent, PluginCompatibility,
+    PluginContext, PluginMetadata, PluginResult, TelemetryEvent, TelemetryEventKind,
+    TelemetryPlugin, export_plugin,
 };
 
 /// Probe output is rate-limited to one line per real-time second.
@@ -35,6 +37,17 @@ const LOG_INTERVAL_MICROSECONDS: u64 = 1_000_000;
 /// Conversion factor from the SDK's SI speed unit to the unit displayed by the
 /// current diagnostic log.
 const METRES_PER_SECOND_TO_KILOMETRES_PER_HOUR: f32 = 3.6;
+
+/// Compatibility requirements derived from capabilities used by this example.
+///
+/// Gameplay callbacks require Telemetry API 1.01. ETS2 schema 1.14 is the first
+/// version documented by SCS with gameplay-event support; the navigation
+/// channels used below arrived earlier in schema 1.12. Later schema minors are
+/// compatible additions and are accepted within major version 1.
+static SUPPORTED_GAMES: [GameCompatibility; 1] = [GameCompatibility::new(
+    Game::EuroTruckSimulator2,
+    game::ets2::V1_14,
+)];
 
 /// Last values received from the selected telemetry channels.
 ///
@@ -204,9 +217,14 @@ impl TelemetryExample {
         let destination_company_id = configuration_event
             .string_owned(configuration::attributes::DESTINATION_COMPANY_ID)
             .unwrap_or_default();
-        let market = configuration_event
+        // Keep both views deliberately. `job_market` gives application logic a
+        // closed, typed SDK 1.14 value, while the generic string accessor keeps
+        // a future additive market visible in diagnostics instead of erasing it
+        // merely because this build predates that value.
+        let market_raw = configuration_event
             .string_owned(configuration::attributes::JOB_MARKET)
             .unwrap_or_default();
+        let market_known = configuration_event.job_market();
 
         let mass = configuration_event
             .get(configuration::attributes::CARGO_MASS)
@@ -230,7 +248,8 @@ impl TelemetryExample {
         context.message(format_args!(
             concat!(
                 "[scs-sdk-example] job cargo={} cargo_id={} mass={:.0}kg ",
-                "source={}({})/{}({}) destination={}({})/{}({}) market={} ",
+                "source={}({})/{}({}) destination={}({})/{}({}) ",
+                "market_raw={} market_known={:?} ",
                 "income={} planned_distance={}km delivery_time={} ",
                 "cargo_loaded={} special_job={}"
             ),
@@ -245,7 +264,8 @@ impl TelemetryExample {
             destination_city_id,
             destination_company,
             destination_company_id,
-            market,
+            market_raw,
+            market_known,
             income,
             planned_distance,
             delivery_time,
@@ -298,6 +318,24 @@ impl TelemetryExample {
             context.message(format_args!(
                 "[scs-sdk-example] job cancelled penalty={penalty}"
             ));
+        } else if event.is(gameplay::events::PLAYER_FINED) {
+            // As with job markets, retain the original SDK string beside the
+            // typed value so a newer game can add an offence without making an
+            // older plugin print a misleading known classification.
+            let offence_raw = event
+                .string_owned(gameplay::attributes::FINE_OFFENCE)
+                .unwrap_or_default();
+            let offence_known = event.fine_offence();
+            let amount = event
+                .get(gameplay::attributes::FINE_AMOUNT)
+                .unwrap_or_default();
+            context.message(format_args!(
+                concat!(
+                    "[scs-sdk-example] player fined offence_raw={} ",
+                    "offence_known={:?} amount={}"
+                ),
+                offence_raw, offence_known, amount,
+            ));
         }
     }
 }
@@ -307,21 +345,12 @@ impl TelemetryPlugin for TelemetryExample {
         PluginMetadata::new("SCS SDK Telemetry Example", env!("CARGO_PKG_VERSION"))
     }
 
+    fn compatibility(&self) -> PluginCompatibility {
+        PluginCompatibility::new(TelemetryApiVersion::V1_01, &SUPPORTED_GAMES)
+    }
+
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
         *self = Self::default();
-
-        // ETS2 uses the stable `eut2` identifier. Rejecting another game here
-        // avoids silently treating ATS-specific channel semantics as product
-        // data even though both titles share most telemetry declarations.
-        if context.game().kind() != Game::EuroTruckSimulator2 {
-            return Err(PluginError::new(
-                scs_sdk_plugin::sdk::SdkError::Unsupported,
-                format!(
-                    "the ETS2 telemetry example was loaded by unsupported game {:?}",
-                    context.game().id()
-                ),
-            ));
-        }
 
         // Event capabilities are deliberately listed rather than inferred from
         // the `event` hook. Removing one line here removes the corresponding SDK

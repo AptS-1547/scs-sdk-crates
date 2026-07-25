@@ -27,10 +27,13 @@ SCS Software SDK 的类型化 Rust bindings 与 safe plugin framework。当前 w
 | **Channels 合计** | **107** | `channels::ALL` |
 | Configuration IDs | 6 | `configuration::ids::*` 与 `ids::ALL` |
 | Configuration attributes | 60 | `configuration::attributes::*` 与 `attributes::ALL` |
-| H-shifter values | 4 | `ShifterType` |
+| Configuration associations | 71 | `configuration::associations::*` 与 `associations::ALL` |
+| H-shifter values | 4 | `ShifterType::ALL` |
+| Job market values | 5 | `JobMarket::ALL` |
 | Gameplay events | 6 | `gameplay::events::*` 与 `events::ALL` |
 | Gameplay attributes | 15 | `gameplay::attributes::*` 与 `attributes::ALL` |
-| Fine offence values | 14 | `FineOffence` |
+| Gameplay associations | 21 | `gameplay::associations::*` 与 `associations::ALL` |
+| Fine offence values | 14 | `FineOffence::ALL` |
 
 除此之外，raw ABI 还覆盖：
 
@@ -95,12 +98,28 @@ scs-sdk-sys <- scs-sdk <- scs-sdk-plugin <- scs-sdk-plugin-macros / application
 - `TelemetryApi`、`TelemetrySession` 和不可逃逸的 `SdkCall` scope；
 - `ScopedLogger` 与封闭的 `LogLevel`；
 - SDK result code 的完整映射；
+- 相互独立的 `TelemetryApiVersion`、`GameSchemaVersion` 强类型，以及直接从 raw header 投影的 `game::ets2::*`、`game::ats::*` typed schema 历史常量；
 - `Channel<T>`、`AnyChannel`、`ChannelFlags`；
 - `Attribute<T>`、`AnyAttribute`、`ConfigurationId`、`GameplayEventId`；
+- 相互独立的 `SdkIndex`、`TrailerIndex` 与 `TrailerConfigurationId` 域，避免
+  SDK indexed value、编号式 trailer namespace 与 legacy 无编号 `trailer`
+  configuration 被静默混用；
+- `ConfigurationAttributeAssociation` 与 `GameplayAttributeAssociation`，
+  完整保留每个共享 attribute 由哪个 configuration group 或 event 携带；
+- 每个内置 channel、configuration、gameplay descriptor 及 descriptor association
+  都保留 `GameSchemaAvailability` 元数据；ETS2 与 ATS 的最低 schema 分开记录，
+  证据来自官方 SDK 1.0 到 1.14 的历史 header；
+- `ShifterType`、`JobMarket`、`FineOffence` 封闭字符串 value catalog，提供
+  `ALL`、`COUNT`、`as_str`、`FromStr` 与 value-level schema availability；
+- 零分配 parse failure 类型 `UnknownStringValue`；generic string API 同时保留
+  future unknown value 的原文，供向前兼容诊断；
 - `ValueRef` 对 tagged union 先验证 tag，再读取对应活跃成员；
+- `ValueType` capability 元数据，包括 signed 64-bit value 需要 Telemetry API 1.01 的官方版本下限；
 - Rust-owned 几何值 `FVector`、`DVector`、`Euler`、`FPlacement`、`DPlacement`；
 - `NamedValues` 哨兵数组迭代与 typed attribute lookup；
-- 107 个 typed channel、60 个 configuration attribute 和 15 个 gameplay attribute 的可枚举 catalog。
+- 107 个 typed channel、60 个 configuration attribute、71 条 configuration
+  association、15 个 gameplay attribute 与 21 条 gameplay association 的可枚举
+  catalog。
 
 `DPlacement` 的高层值不携带 ABI padding。它可被复制和长期保存，而 wrapper 在解码时不会读取 SDK 未初始化的对齐字节。
 
@@ -112,13 +131,20 @@ SDK 规定调回游戏的 API 只能在主线程，并且只能发生在游戏�
 
 - `TelemetryPlugin` 生命周期；
 - 通过必需的 `PluginMetadata` 显式声明产品身份；
+- 通过必需的 `PluginCompatibility` 显式声明产品兼容要求；
 - `PluginContext` 显式 event/channel subscription；
-- owned `GameInfo` 与 `Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}` 类型化游戏判断；
+- owned `GameInfo`、`Game::{EuroTruckSimulator2, AmericanTruckSimulator, Other}`
+  类型化游戏判断，以及 descriptor、association、value capability 共用的
+  canonical `minimum_schema_for` / `supports` 查询；
 - `ChannelUpdate` 的 descriptor、SDK index、trailer index 与 typed value 解码；
-- `TelemetryEvent`、`ConfigurationEvent`、`GameplayEvent`；
+- `TelemetryEvent`、`ConfigurationEvent`、`GameplayEvent`，包括 typed trailer
+  configuration identity，以及高层 `shifter_type`、`job_market`、`fine_offence`
+  value decoder；
 - Rust `str`/`String` 形式的游戏信息、configuration string 和 gameplay string；
 - init/reinit/shutdown 状态机；
 - 注册失败后的逆序事务回滚；
+- required/optional descriptor 的 game-schema 预检，包括单独演进的编号式
+  multi-trailer namespace；
 - callback 与 shutdown 中的 panic containment；
 - mutex poison 恢复；
 - 旧 session callback 的 generation 隔离；
@@ -133,6 +159,43 @@ runtime 会在产品初始化前记录产品与兼容性身份，并在注册提
 [scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
 [scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.0" events=6 channels=8
 ```
+
+API 支持能力只有一个权威来源：`scs-sdk::TelemetryApi` 列出已经审计 foreign
+初始化布局 adapter 的版本，framework 直接消费该结果，不再维护第二份版本白名单。
+产品的 `PluginCompatibility` 是另一层独立声明：它描述产品实际需要的最低 API
+能力以及每款支持游戏的最低 schema。runtime 在同一 major 内接受更高 schema minor，
+遇到不同 major 时等待显式审计，并在产品初始化和 SDK 注册之前完成全部验证。
+
+下载压缩包末尾的版本、协商得到的 Telemetry API、每款游戏的 telemetry schema
+是三个不同版本域。官方 SDK 1.0 到 1.14 的历史压缩包给出了以下对应关系：
+
+| SDK 压缩包 | Telemetry API `CURRENT` | ETS2 schema `CURRENT` | ATS schema `CURRENT` |
+| --- | --- | --- | --- |
+| 1.0 | 1.00 | 1.05 | - |
+| 1.1 | 1.00 | 1.07 | - |
+| 1.2 | 1.00 | 1.08 | - |
+| 1.3 | 1.00 | 1.09 | - |
+| 1.4 | 1.00 | 1.10 | - |
+| 1.5 | 1.00 | 1.12 | - |
+| 1.6-1.8 | 1.00 | 1.12 | 1.00 |
+| 1.9 | 1.00 | 1.13 | 1.00 |
+| 1.10 | 1.01 | 1.14 | 1.01 |
+| 1.11 | 1.01 | 1.15 | 1.02 |
+| 1.12 | 1.01 | 1.16 | 1.03 |
+| 1.13 | 1.01 | 1.17 | 1.04 |
+| 1.14 | 1.01 | 1.18 | 1.05 |
+
+其中，官方 SDK 1.10 到 1.14 的 `scssdk_telemetry.h` 逐字节相同，但游戏专属
+header 仍在继续增加 descriptor。wrapper 已把这些新增历史作为 per-game schema
+availability 记录到 `Channel`、`Attribute`、`ConfigurationId`、
+`GameplayEventId` 与 `Event`。另外，71 条 configuration attribute 关系与 21 条
+gameplay attribute 关系单独记录，因为一个 attribute 可能在自身 descriptor 出现很久后
+才加入第二个 group；`FineOffence` 在 value level 也保留同样的历史差异。编号式 trailer
+namespace 与 gameplay payload 的共同版本边界统一由 `game::capabilities` 提供，不在各个
+catalog 重复写 schema 数字。loading schema 太旧时，required registration 会在本地直接
+失败，optional registration 则在 SDK 收到不存在的名称之前本地跳过；channel-specific
+value conversion 和运行时缺失仍由 SCS 最终判定。因此插件不会要求用户选择某个 SDK
+压缩包。
 
 ### `scs-sdk-plugin-macros`
 
@@ -163,29 +226,46 @@ scs_telemetry_shutdown
 插件必须在 `initialize` 中逐项声明意图：
 
 ```rust
-use scs_sdk_plugin::sdk::{ChannelFlags, channels};
+use scs_sdk_plugin::sdk::{
+    ChannelFlags, SdkIndex, TelemetryApiVersion, TrailerIndex, channels, game,
+};
 use scs_sdk_plugin::{
-    PluginContext, PluginMetadata, PluginResult, TelemetryEventKind, TelemetryPlugin,
+    Game, GameCompatibility, PluginCompatibility, PluginContext, PluginMetadata,
+    PluginResult, TelemetryEventKind, TelemetryPlugin,
 };
 
 struct Plugin;
+
+static SUPPORTED_GAMES: [GameCompatibility; 1] = [GameCompatibility::new(
+    Game::EuroTruckSimulator2,
+    game::ets2::V1_00,
+)];
 
 impl TelemetryPlugin for Plugin {
     fn metadata(&self) -> PluginMetadata {
         PluginMetadata::new("My Telemetry Plugin", env!("CARGO_PKG_VERSION"))
     }
 
+    fn compatibility(&self) -> PluginCompatibility {
+        PluginCompatibility::new(TelemetryApiVersion::V1_00, &SUPPORTED_GAMES)
+    }
+
     fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
         context.subscribe_event(TelemetryEventKind::Started)?;
         context.subscribe_event(TelemetryEventKind::FrameEnd)?;
+        context.subscribe_event_optional(TelemetryEventKind::Gameplay)?;
 
         context.subscribe(channels::truck::SPEED)?;
+        context.subscribe_optional(channels::truck::NAVIGATION_SPEED_LIMIT)?;
         context.subscribe_with_flags(
             channels::truck::ENGINE_RPM,
             ChannelFlags::EACH_FRAME,
         )?;
-        context.subscribe_at(channels::truck::WHEEL_ROTATION, 0)?;
-        context.subscribe_trailer(channels::trailer::CONNECTED, 1)?;
+        context.subscribe_at(channels::truck::WHEEL_ROTATION, SdkIndex::ZERO)?;
+        context.subscribe_trailer(
+            channels::trailer::CONNECTED,
+            TrailerIndex::ALL[1],
+        )?;
 
         Ok(())
     }
@@ -199,11 +279,26 @@ impl TelemetryPlugin for Plugin {
 - `subscribe_trailer(channel, trailer_index)`：`trailer.0.*` 至 `trailer.9.*` 名称中的挂车编号；
 - `subscribe_trailer_at(channel, trailer_index, sdk_index)`：指定挂车的 indexed channel；
 - 每组都有 `_with_flags` 版本，用于显式选择 `EACH_FRAME`、`NO_VALUE` 等 delivery flags；
-- `Channel::requesting<U>()` 显式选择 SDK 转换后的 value representation，兼容性最终由游戏注册函数裁定。
+- 每个 channel index domain 都有对应的显式 `subscribe*_optional` 方法族；optional 声明只容忍 `NotFound` 和 `UnsupportedType`，跳过时保留产品侧默认值，并且不会放宽 descriptor 形状、重复声明、生命周期或其他 SDK 错误；
+- `subscribe_event_optional(event)` 会跳过晚于当前协商 API 才出现的 event，并且在 event 注册阶段只容忍 `Unsupported` 或 `NotFound`；
+- `Channel::requesting<U>()` 显式选择 SDK 转换后的 value representation。required representation 若晚于当前协商 API，framework 会在注册前拒绝（`i64` 需要 Telemetry API 1.01）；具体 channel conversion 仍由 SCS 最终判定。optional 的新版 representation 会被跳过。
+
+`SdkIndex::new` 只排除表示 scalar 的 `SCS_U32_NIL` sentinel。
+`TrailerIndex::new` 验证 SDK 1.14 官方规定的 `0..10` 范围，
+`TrailerIndex::ALL` 则提供十个静态有效值。Configuration callback 通过
+`TrailerConfigurationId` 保留 legacy `trailer` 与编号式 `trailer.0` 的差异，
+不会把 legacy identity 静默重写成 `TrailerIndex::ZERO`。
+
+SDK 中形似 enum 的字符串使用“typed known + raw unknown”成对 API。
+`ConfigurationEvent::shifter_type`、`ConfigurationEvent::job_market` 与
+`GameplayEvent::fine_offence` 会在值属于 SDK 1.14 已知集合时返回 enum；generic
+`string` / `string_owned` accessor 仍同时可用，因此未来游戏新增的原始值不会丢失。
+这些 catalog enum 也实现了 `FromStr`；`GameInfo::supports` 则根据检测到的游戏类型
+与 schema，统一判断任意 `GameSchemaAvailability`。
 
 `TelemetryPlugin::initialize` 没有默认实现。空插件若没有显式订阅，runtime 对 SDK 发起的 event/channel 注册次数就是零。重复订阅会在调用 SDK 之前返回 `AlreadyRegistered`；在 callback 或 shutdown 阶段订阅会返回 `NotNow`。
 
-显式意图不等于把资源管理推给产品。插件成功返回后，runtime 才提交注册；任一 SDK 调用失败时，之前已注册项目会按相反顺序注销。正常 shutdown 使用相同的逆序规则。
+显式意图不等于把资源管理推给产品。插件成功返回后，runtime 才提交注册；预期的 capability 缺失只跳过对应 optional 声明，required 失败以及 optional 的非 capability 错误都会让已完成前缀按相反顺序回滚。正常 shutdown 使用相同的逆序规则，committed count 只统计实际注册成功的项目。
 
 ## 示例插件边界
 
@@ -374,8 +469,8 @@ target/x86_64-pc-windows-gnu/release/scs_sdk_telemetry_example.dll
 
 - PE32+ DLL；
 - x86-64 architecture；
-- `scs_telemetry_init` dynamic export；
-- `scs_telemetry_shutdown` dynamic export。
+- PE export table 恰好只包含 `scs_telemetry_init` 与
+  `scs_telemetry_shutdown`，不存在额外 named 或 ordinal-only export。
 
 也可单独验证已有产物：
 
@@ -405,8 +500,8 @@ target/x86_64-unknown-linux-gnu/release/libscs_sdk_telemetry_example.so
 
 - ELF 64-bit LSB shared object；
 - x86-64 architecture；
-- dynamic symbol table 中的 `scs_telemetry_init`；
-- dynamic symbol table 中的 `scs_telemetry_shutdown`。
+- defined dynamic export 集合恰好为 `scs_telemetry_init` 与
+  `scs_telemetry_shutdown`。
 
 也可单独验证已有产物：
 
@@ -433,8 +528,8 @@ target/x86_64-apple-darwin/release/libscs_sdk_telemetry_example.dylib
 - Mach-O 64-bit dynamically linked shared library；
 - x86-64 architecture；
 - 有效的 embedded code signature；本地与 CI 构建使用 ad-hoc identity；
-- Mach-O C ABI 使用的 external `_scs_telemetry_init` symbol；
-- Mach-O C ABI 使用的 external `_scs_telemetry_shutdown` symbol。
+- defined external symbol 集合恰好为 `_scs_telemetry_init` 与
+  `_scs_telemetry_shutdown`；前导下划线来自 Mach-O C ABI 拼写。
 
 ad-hoc signature 能为本地构建提供可验证的 code directory，但它不等于 Developer ID signing 或 notarization。公开 release pipeline 后续应替换为项目自己的 Developer ID 签名与 notarized 分发包。
 

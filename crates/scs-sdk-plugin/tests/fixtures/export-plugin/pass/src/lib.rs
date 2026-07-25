@@ -17,7 +17,16 @@
     clippy::unwrap_used
 )]
 
-use scs_sdk_plugin::{PluginContext, PluginMetadata, PluginResult, TelemetryPlugin};
+use scs_sdk_plugin::sdk::{TelemetryApiVersion, game};
+use scs_sdk_plugin::{
+    Game, GameCompatibility, PluginCompatibility, PluginContext, PluginMetadata, PluginResult,
+    TelemetryPlugin,
+};
+
+static SUPPORTED_GAMES: [GameCompatibility; 1] = [GameCompatibility::new(
+    Game::EuroTruckSimulator2,
+    game::ets2::V1_00,
+)];
 
 /// Minimal product-owned state used to prove the constructor expression is
 /// accepted without any raw SDK types or framework-private imports.
@@ -30,6 +39,11 @@ impl TelemetryPlugin for Plugin {
     /// Supplies explicit identity without relying on the fixture package name.
     fn metadata(&self) -> PluginMetadata {
         PluginMetadata::new("Export fixture", env!("CARGO_PKG_VERSION"))
+    }
+
+    /// Declares a real public compatibility contract without raw SDK constants.
+    fn compatibility(&self) -> PluginCompatibility {
+        PluginCompatibility::new(TelemetryApiVersion::V1_00, &SUPPORTED_GAMES)
     }
 
     /// Performs an explicit state transition while requesting no subscriptions.

@@ -2,7 +2,10 @@ use core::ffi::{CStr, c_void};
 use core::marker::PhantomData;
 use core::ops::{BitOr, BitOrAssign};
 
-use crate::{SdkCall, SdkError, SdkResult, SdkValue, ValueRef, ValueType, sys};
+use crate::{
+    GameSchemaAvailability, SdkCall, SdkError, SdkIndex, SdkResult, SdkValue, ValueRef, ValueType,
+    sys,
+};
 
 /// Value types which can be requested from an SCS telemetry channel.
 ///
@@ -18,6 +21,7 @@ impl<T: SdkValue> ChannelValue for T {}
 pub struct Channel<T> {
     name: &'static CStr,
     indexed: bool,
+    availability: GameSchemaAvailability,
     marker: PhantomData<fn() -> T>,
 }
 
@@ -36,6 +40,7 @@ pub struct AnyChannel {
     name: &'static CStr,
     value_type: ValueType,
     indexed: bool,
+    availability: GameSchemaAvailability,
 }
 
 impl AnyChannel {
@@ -59,6 +64,16 @@ impl AnyChannel {
     pub const fn is_indexed(self) -> bool {
         self.indexed
     }
+
+    /// Returns the official per-game schema history for this channel.
+    ///
+    /// Type erasure retains availability so framework code can reject a
+    /// required channel, or skip an optional channel, before asking an older
+    /// game schema to register a name it cannot expose.
+    #[must_use]
+    pub const fn availability(self) -> GameSchemaAvailability {
+        self.availability
+    }
 }
 
 impl<T> Clone for Channel<T> {
@@ -71,10 +86,11 @@ impl<T> Copy for Channel<T> {}
 
 impl<T: ChannelValue> Channel<T> {
     #[must_use]
-    pub const fn new(name: &'static CStr) -> Self {
+    pub const fn new(name: &'static CStr, availability: GameSchemaAvailability) -> Self {
         Self {
             name,
             indexed: false,
+            availability,
             marker: PhantomData,
         }
     }
@@ -82,10 +98,11 @@ impl<T: ChannelValue> Channel<T> {
     /// Creates a descriptor whose values are selected through the SDK `index`
     /// parameter, such as individual wheel or H-shifter selector channels.
     #[must_use]
-    pub const fn indexed(name: &'static CStr) -> Self {
+    pub const fn indexed(name: &'static CStr, availability: GameSchemaAvailability) -> Self {
         Self {
             name,
             indexed: true,
+            availability,
             marker: PhantomData,
         }
     }
@@ -106,6 +123,12 @@ impl<T: ChannelValue> Channel<T> {
         self.indexed
     }
 
+    /// Returns the first official ETS2 and ATS schemas for this channel.
+    #[must_use]
+    pub const fn availability(self) -> GameSchemaAvailability {
+        self.availability
+    }
+
     /// Requests the same channel using another SDK value representation.
     ///
     /// SCS performs the authoritative compatibility check during registration
@@ -115,6 +138,7 @@ impl<T: ChannelValue> Channel<T> {
         Channel {
             name: self.name,
             indexed: self.indexed,
+            availability: self.availability,
             marker: PhantomData,
         }
     }
@@ -130,6 +154,7 @@ impl<T: ChannelValue> Channel<T> {
             name: self.name,
             value_type: T::VALUE_TYPE,
             indexed: self.indexed,
+            availability: self.availability,
         }
     }
 
@@ -186,7 +211,7 @@ impl SdkCall<'_> {
     pub unsafe fn register_channel<T: ChannelValue>(
         &self,
         channel: Channel<T>,
-        index: Option<sys::ScsU32>,
+        index: Option<SdkIndex>,
         flags: ChannelFlags,
         callback: sys::ScsTelemetryChannelCallback,
         context: *mut c_void,
@@ -196,7 +221,7 @@ impl SdkCall<'_> {
         let result = unsafe {
             (self.table.register_for_channel)(
                 channel.name().as_ptr(),
-                index.unwrap_or(sys::SCS_U32_NIL),
+                index.map_or(sys::SCS_U32_NIL, SdkIndex::raw),
                 channel.value_type(),
                 flags.bits(),
                 callback,
@@ -221,13 +246,13 @@ impl SdkCall<'_> {
     pub unsafe fn unregister_channel<T: ChannelValue>(
         &self,
         channel: Channel<T>,
-        index: Option<sys::ScsU32>,
+        index: Option<SdkIndex>,
     ) -> SdkResult {
         // SAFETY: The caller upholds the SDK call-site restriction.
         let result = unsafe {
             (self.table.unregister_from_channel)(
                 channel.name().as_ptr(),
-                index.unwrap_or(sys::SCS_U32_NIL),
+                index.map_or(sys::SCS_U32_NIL, SdkIndex::raw),
                 channel.value_type(),
             )
         };
@@ -256,7 +281,7 @@ impl SdkCall<'_> {
     pub unsafe fn register_erased_channel(
         &self,
         name: &CStr,
-        index: Option<sys::ScsU32>,
+        index: Option<SdkIndex>,
         value_type: ValueType,
         flags: ChannelFlags,
         callback: sys::ScsTelemetryChannelCallback,
@@ -267,7 +292,7 @@ impl SdkCall<'_> {
         let result = unsafe {
             (self.table.register_for_channel)(
                 name.as_ptr(),
-                index.unwrap_or(sys::SCS_U32_NIL),
+                index.map_or(sys::SCS_U32_NIL, SdkIndex::raw),
                 value_type.raw(),
                 flags.bits(),
                 callback,
@@ -291,7 +316,7 @@ impl SdkCall<'_> {
     pub unsafe fn unregister_erased_channel(
         &self,
         name: &CStr,
-        index: Option<sys::ScsU32>,
+        index: Option<SdkIndex>,
         value_type: ValueType,
     ) -> SdkResult {
         // SAFETY: The caller upholds the SDK call-site and storage-lifetime
@@ -299,7 +324,7 @@ impl SdkCall<'_> {
         let result = unsafe {
             (self.table.unregister_from_channel)(
                 name.as_ptr(),
-                index.unwrap_or(sys::SCS_U32_NIL),
+                index.map_or(sys::SCS_U32_NIL, SdkIndex::raw),
                 value_type.raw(),
             )
         };
@@ -310,10 +335,48 @@ impl SdkCall<'_> {
 /// Complete typed channel catalog for SCS Telemetry SDK 1.14.
 pub mod channels {
     use super::AnyChannel;
+    use crate::{GameSchemaAvailability, game};
+
+    // These constants encode the game-schema history documented by the ETS2
+    // and ATS headers. They are deliberately named by both version domains:
+    // an ETS2 minor must never be reused as though it were the equivalent ATS
+    // minor merely because both games expose the same common C macro.
+    const INITIAL: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_00), Some(game::ats::V1_00));
+    const ETS2_1_01_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_01), Some(game::ats::V1_00));
+    const ETS2_1_02_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_02), Some(game::ats::V1_00));
+    const ETS2_1_04_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_04), Some(game::ats::V1_00));
+    const ETS2_1_09_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_09), Some(game::ats::V1_00));
+    const ETS2_1_10_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_10), Some(game::ats::V1_00));
+    const ETS2_1_11_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_11), Some(game::ats::V1_00));
+    const ETS2_1_12_ATS_1_00: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_12), Some(game::ats::V1_00));
+    const ETS2_ONLY_1_12: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_12), None);
+    const ETS2_1_14_ATS_1_01: GameSchemaAvailability = game::capabilities::MULTI_TRAILER;
+    const ETS2_1_17_ATS_1_04: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_17), Some(game::ats::V1_04));
+    const ETS2_1_18_ATS_1_05: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_18), Some(game::ats::V1_05));
+
+    /// First schema which supports the numbered `trailer.[index].*` namespace.
+    ///
+    /// The static `trailer.*` descriptors predate this feature. Framework code
+    /// must combine their individual availability with this capability when it
+    /// constructs a numbered multi-trailer channel name.
+    pub const MULTI_TRAILER_AVAILABILITY: GameSchemaAvailability =
+        game::capabilities::MULTI_TRAILER;
 
     /// Channels declared by `scssdk_telemetry_common_channels.h`.
     pub mod common {
         use super::super::{AnyChannel, Channel};
+        use super::{ETS2_1_09_ATS_1_00, ETS2_1_18_ATS_1_05, INITIAL};
 
         /// Number of typed descriptors in this catalog group.
         pub const COUNT: usize = 4;
@@ -326,7 +389,7 @@ pub mod channels {
         /// channel.
         ///
         /// Type: float
-        pub const LOCAL_SCALE: Channel<f32> = Channel::new(c"local.scale");
+        pub const LOCAL_SCALE: Channel<f32> = Channel::new(c"local.scale", INITIAL);
 
         /// Absolute in-game time.
         ///
@@ -334,7 +397,7 @@ pub mod channels {
         /// of the first in-game day.
         ///
         /// Type: u32
-        pub const GAME_TIME: Channel<u32> = Channel::new(c"game.time");
+        pub const GAME_TIME: Channel<u32> = Channel::new(c"game.time", ETS2_1_09_ATS_1_00);
 
         /// Offset from the `game_time` simulated in the local economy to the
         /// game time of the Convoy multiplayer server.
@@ -347,7 +410,8 @@ pub mod channels {
         /// Represented in in-game minutes. Set to 0 when multiplayer is not active.
         ///
         /// Type: s32
-        pub const MULTIPLAYER_TIME_OFFSET: Channel<i32> = Channel::new(c"multiplayer.time.offset");
+        pub const MULTIPLAYER_TIME_OFFSET: Channel<i32> =
+            Channel::new(c"multiplayer.time.offset", ETS2_1_18_ATS_1_05);
 
         /// Time until next rest stop.
         ///
@@ -358,7 +422,7 @@ pub mod channels {
         /// Represented in in-game minutes.
         ///
         /// Type: s32
-        pub const NEXT_REST_STOP: Channel<i32> = Channel::new(c"rest.stop");
+        pub const NEXT_REST_STOP: Channel<i32> = Channel::new(c"rest.stop", ETS2_1_09_ATS_1_00);
 
         /// Every common channel in the order used by the SDK 1.14 header.
         ///
@@ -376,6 +440,10 @@ pub mod channels {
     /// Channels declared by `scssdk_telemetry_truck_common_channels.h`.
     pub mod truck {
         use super::super::{AnyChannel, Channel};
+        use super::{
+            ETS2_1_01_ATS_1_00, ETS2_1_02_ATS_1_00, ETS2_1_04_ATS_1_00, ETS2_1_10_ATS_1_00,
+            ETS2_1_11_ATS_1_00, ETS2_1_12_ATS_1_00, ETS2_1_17_ATS_1_04, ETS2_ONLY_1_12, INITIAL,
+        };
 
         /// Number of typed descriptors in this catalog group.
         pub const COUNT: usize = 84;
@@ -384,55 +452,56 @@ pub mod channels {
         ///
         /// Type: dplacement
         pub const WORLD_PLACEMENT: Channel<crate::DPlacement> =
-            Channel::new(c"truck.world.placement");
+            Channel::new(c"truck.world.placement", INITIAL);
 
         /// Represents vehicle space linear velocity of the truck measured
         /// in meters per second.
         ///
         /// Type: fvector
         pub const LOCAL_LINEAR_VELOCITY: Channel<crate::FVector> =
-            Channel::new(c"truck.local.velocity.linear");
+            Channel::new(c"truck.local.velocity.linear", INITIAL);
 
         /// Represents vehicle space angular velocity of the truck measured
         /// in rotations per second.
         ///
         /// Type: fvector
         pub const LOCAL_ANGULAR_VELOCITY: Channel<crate::FVector> =
-            Channel::new(c"truck.local.velocity.angular");
+            Channel::new(c"truck.local.velocity.angular", INITIAL);
 
         /// Represents vehicle space linear acceleration of the truck measured
         /// in meters per second^2
         ///
         /// Type: fvector
         pub const LOCAL_LINEAR_ACCELERATION: Channel<crate::FVector> =
-            Channel::new(c"truck.local.acceleration.linear");
+            Channel::new(c"truck.local.acceleration.linear", INITIAL);
 
         /// Represents vehicle space angular acceleration of the truck meassured
         /// in rotations per second^2
         ///
         /// Type: fvector
         pub const LOCAL_ANGULAR_ACCELERATION: Channel<crate::FVector> =
-            Channel::new(c"truck.local.acceleration.angular");
+            Channel::new(c"truck.local.acceleration.angular", INITIAL);
 
         /// Represents a vehicle space position and orientation delta
         /// of the cabin from its default position.
         ///
         /// Type: fplacement
-        pub const CABIN_OFFSET: Channel<crate::FPlacement> = Channel::new(c"truck.cabin.offset");
+        pub const CABIN_OFFSET: Channel<crate::FPlacement> =
+            Channel::new(c"truck.cabin.offset", ETS2_1_02_ATS_1_00);
 
         /// Represents cabin space angular velocity of the cabin measured
         /// in rotations per second.
         ///
         /// Type: fvector
         pub const CABIN_ANGULAR_VELOCITY: Channel<crate::FVector> =
-            Channel::new(c"truck.cabin.velocity.angular");
+            Channel::new(c"truck.cabin.velocity.angular", INITIAL);
 
         /// Represents cabin space angular acceleration of the cabin
         /// measured in rotations per second^2
         ///
         /// Type: fvector
         pub const CABIN_ANGULAR_ACCELERATION: Channel<crate::FVector> =
-            Channel::new(c"truck.cabin.acceleration.angular");
+            Channel::new(c"truck.cabin.acceleration.angular", INITIAL);
 
         /// Represents a cabin space position and orientation delta
         /// of the driver head from its default position.
@@ -441,19 +510,20 @@ pub mod channels {
         /// the user switching between cameras or camera presets.
         ///
         /// Type: fplacement
-        pub const HEAD_OFFSET: Channel<crate::FPlacement> = Channel::new(c"truck.head.offset");
+        pub const HEAD_OFFSET: Channel<crate::FPlacement> =
+            Channel::new(c"truck.head.offset", INITIAL);
 
         /// Speedometer speed in meters per second.
         ///
         /// Uses negative value to represent reverse movement.
         ///
         /// Type: float
-        pub const SPEED: Channel<f32> = Channel::new(c"truck.speed");
+        pub const SPEED: Channel<f32> = Channel::new(c"truck.speed", INITIAL);
 
         /// RPM of the engine.
         ///
         /// Type: float
-        pub const ENGINE_RPM: Channel<f32> = Channel::new(c"truck.engine.rpm");
+        pub const ENGINE_RPM: Channel<f32> = Channel::new(c"truck.engine.rpm", INITIAL);
 
         /// Gear currently selected in the engine.
         ///
@@ -462,7 +532,7 @@ pub mod channels {
         /// - <0 - Reverse gears
         ///
         /// Type: s32
-        pub const ENGINE_GEAR: Channel<i32> = Channel::new(c"truck.engine.gear");
+        pub const ENGINE_GEAR: Channel<i32> = Channel::new(c"truck.engine.gear", INITIAL);
 
         /// Gear currently displayed on dashboard.
         ///
@@ -471,7 +541,8 @@ pub mod channels {
         /// - <0 - Reverse gears
         ///
         /// Type: s32
-        pub const DISPLAYED_GEAR: Channel<i32> = Channel::new(c"truck.displayed.gear");
+        pub const DISPLAYED_GEAR: Channel<i32> =
+            Channel::new(c"truck.displayed.gear", ETS2_1_11_ATS_1_00);
 
         /// Steering received from input <-1;1>.
         ///
@@ -481,7 +552,7 @@ pub mod channels {
         /// (e.g. keyboard) this value goes immediatelly to -1.0
         ///
         /// Type: float
-        pub const INPUT_STEERING: Channel<f32> = Channel::new(c"truck.input.steering");
+        pub const INPUT_STEERING: Channel<f32> = Channel::new(c"truck.input.steering", INITIAL);
 
         /// Throttle received from input <0;1>
         ///
@@ -489,7 +560,7 @@ pub mod channels {
         /// (e.g. keyboard) this value goes immediatelly to 1.0
         ///
         /// Type: float
-        pub const INPUT_THROTTLE: Channel<f32> = Channel::new(c"truck.input.throttle");
+        pub const INPUT_THROTTLE: Channel<f32> = Channel::new(c"truck.input.throttle", INITIAL);
 
         /// Brake received from input <0;1>
         ///
@@ -497,7 +568,7 @@ pub mod channels {
         /// (e.g. keyboard) this value goes immediatelly to 1.0
         ///
         /// Type: float
-        pub const INPUT_BRAKE: Channel<f32> = Channel::new(c"truck.input.brake");
+        pub const INPUT_BRAKE: Channel<f32> = Channel::new(c"truck.input.brake", INITIAL);
 
         /// Clutch received from input <0;1>
         ///
@@ -505,7 +576,7 @@ pub mod channels {
         /// (e.g. keyboard) this value goes immediatelly to 1.0
         ///
         /// Type: float
-        pub const INPUT_CLUTCH: Channel<f32> = Channel::new(c"truck.input.clutch");
+        pub const INPUT_CLUTCH: Channel<f32> = Channel::new(c"truck.input.clutch", INITIAL);
 
         /// Steering as used by the simulation <-1;1>
         ///
@@ -515,7 +586,8 @@ pub mod channels {
         /// counterfoces for digital inputs.
         ///
         /// Type: float
-        pub const EFFECTIVE_STEERING: Channel<f32> = Channel::new(c"truck.effective.steering");
+        pub const EFFECTIVE_STEERING: Channel<f32> =
+            Channel::new(c"truck.effective.steering", INITIAL);
 
         /// Throttle pedal input as used by the simulation <0;1>
         ///
@@ -523,7 +595,8 @@ pub mod channels {
         /// or cruise-control input.
         ///
         /// Type: float
-        pub const EFFECTIVE_THROTTLE: Channel<f32> = Channel::new(c"truck.effective.throttle");
+        pub const EFFECTIVE_THROTTLE: Channel<f32> =
+            Channel::new(c"truck.effective.throttle", INITIAL);
 
         /// Brake pedal input as used by the simulation <0;1>
         ///
@@ -531,7 +604,7 @@ pub mod channels {
         /// not contain retarder, parking or engine brake.
         ///
         /// Type: float
-        pub const EFFECTIVE_BRAKE: Channel<f32> = Channel::new(c"truck.effective.brake");
+        pub const EFFECTIVE_BRAKE: Channel<f32> = Channel::new(c"truck.effective.brake", INITIAL);
 
         /// Clutch pedal input as used by the simulation <0;1>
         ///
@@ -539,21 +612,21 @@ pub mod channels {
         /// player input.
         ///
         /// Type: float
-        pub const EFFECTIVE_CLUTCH: Channel<f32> = Channel::new(c"truck.effective.clutch");
+        pub const EFFECTIVE_CLUTCH: Channel<f32> = Channel::new(c"truck.effective.clutch", INITIAL);
 
         /// Speed selected for the cruise control in m/s
         ///
         /// Is zero if cruise control is disabled.
         ///
         /// Type: float
-        pub const CRUISE_CONTROL: Channel<f32> = Channel::new(c"truck.cruise_control");
+        pub const CRUISE_CONTROL: Channel<f32> = Channel::new(c"truck.cruise_control", INITIAL);
 
         /// Gearbox slot the h-shifter handle is currently in.
         ///
         /// 0 means that no slot is selected.
         ///
         /// Type: u32
-        pub const HSHIFTER_SLOT: Channel<u32> = Channel::new(c"truck.hshifter.slot");
+        pub const HSHIFTER_SLOT: Channel<u32> = Channel::new(c"truck.hshifter.slot", INITIAL);
 
         /// Enabled state of range/splitter selector toggles.
         ///
@@ -561,17 +634,18 @@ pub mod channels {
         /// selector index is described by HSHIFTER configuration.
         ///
         /// Type: indexed bool
-        pub const HSHIFTER_SELECTOR: Channel<bool> = Channel::indexed(c"truck.hshifter.select");
+        pub const HSHIFTER_SELECTOR: Channel<bool> =
+            Channel::indexed(c"truck.hshifter.select", INITIAL);
 
         /// Is the parking brake enabled?
         ///
         /// Type: bool
-        pub const PARKING_BRAKE: Channel<bool> = Channel::new(c"truck.brake.parking");
+        pub const PARKING_BRAKE: Channel<bool> = Channel::new(c"truck.brake.parking", INITIAL);
 
         /// Is the engine brake enabled?
         ///
         /// Type: bool
-        pub const MOTOR_BRAKE: Channel<bool> = Channel::new(c"truck.brake.motor");
+        pub const MOTOR_BRAKE: Channel<bool> = Channel::new(c"truck.brake.motor", INITIAL);
 
         /// Current level of the retarder.
         ///
@@ -579,115 +653,121 @@ pub mod channels {
         /// value found in TRUCK configuration.
         ///
         /// Type: u32
-        pub const RETARDER_LEVEL: Channel<u32> = Channel::new(c"truck.brake.retarder");
+        pub const RETARDER_LEVEL: Channel<u32> = Channel::new(c"truck.brake.retarder", INITIAL);
 
         /// Pressure in the brake air tank in psi
         ///
         /// Type: float
-        pub const BRAKE_AIR_PRESSURE: Channel<f32> = Channel::new(c"truck.brake.air.pressure");
+        pub const BRAKE_AIR_PRESSURE: Channel<f32> =
+            Channel::new(c"truck.brake.air.pressure", INITIAL);
 
         /// Is the air pressure warning active?
         ///
         /// Type: bool
         pub const BRAKE_AIR_PRESSURE_WARNING: Channel<bool> =
-            Channel::new(c"truck.brake.air.pressure.warning");
+            Channel::new(c"truck.brake.air.pressure.warning", INITIAL);
 
         /// Are the emergency brakes active as result of low air pressure?
         ///
         /// Type: bool
         pub const BRAKE_AIR_PRESSURE_EMERGENCY: Channel<bool> =
-            Channel::new(c"truck.brake.air.pressure.emergency");
+            Channel::new(c"truck.brake.air.pressure.emergency", ETS2_1_01_ATS_1_00);
 
         /// Temperature of the brakes in degrees celsius.
         ///
         /// Aproximated for entire truck, not at the wheel level.
         ///
         /// Type: float
-        pub const BRAKE_TEMPERATURE: Channel<f32> = Channel::new(c"truck.brake.temperature");
+        pub const BRAKE_TEMPERATURE: Channel<f32> =
+            Channel::new(c"truck.brake.temperature", INITIAL);
 
         /// Amount of fuel in liters
         ///
         /// Type: float
-        pub const FUEL: Channel<f32> = Channel::new(c"truck.fuel.amount");
+        pub const FUEL: Channel<f32> = Channel::new(c"truck.fuel.amount", INITIAL);
 
         /// Is the low fuel warning active?
         ///
         /// Type: bool
-        pub const FUEL_WARNING: Channel<bool> = Channel::new(c"truck.fuel.warning");
+        pub const FUEL_WARNING: Channel<bool> = Channel::new(c"truck.fuel.warning", INITIAL);
 
         /// Average consumption of the fuel in liters/km
         ///
         /// Type: float
         pub const FUEL_AVERAGE_CONSUMPTION: Channel<f32> =
-            Channel::new(c"truck.fuel.consumption.average");
+            Channel::new(c"truck.fuel.consumption.average", INITIAL);
 
         /// Estimated range of truck with current amount of fuel in km
         ///
         /// Type: float
-        pub const FUEL_RANGE: Channel<f32> = Channel::new(c"truck.fuel.range");
+        pub const FUEL_RANGE: Channel<f32> = Channel::new(c"truck.fuel.range", ETS2_1_12_ATS_1_00);
 
         /// Amount of `AdBlue` in liters
         ///
         /// Type: float
-        pub const ADBLUE: Channel<f32> = Channel::new(c"truck.adblue");
+        pub const ADBLUE: Channel<f32> = Channel::new(c"truck.adblue", ETS2_ONLY_1_12);
 
         /// Is the low adblue warning active?
         ///
         /// Type: bool
-        pub const ADBLUE_WARNING: Channel<bool> = Channel::new(c"truck.adblue.warning");
+        pub const ADBLUE_WARNING: Channel<bool> =
+            Channel::new(c"truck.adblue.warning", ETS2_ONLY_1_12);
 
         /// Average consumption of the adblue in liters/km
         ///
         /// Type: float
         pub const ADBLUE_AVERAGE_CONSUMPTION: Channel<f32> =
-            Channel::new(c"truck.adblue.consumption.average");
+            Channel::new(c"truck.adblue.consumption.average", ETS2_ONLY_1_12);
 
         /// Pressure of the oil in psi
         ///
         /// Type: float
-        pub const OIL_PRESSURE: Channel<f32> = Channel::new(c"truck.oil.pressure");
+        pub const OIL_PRESSURE: Channel<f32> = Channel::new(c"truck.oil.pressure", INITIAL);
 
         /// Is the oil pressure warning active?
         ///
         /// Type: bool
-        pub const OIL_PRESSURE_WARNING: Channel<bool> = Channel::new(c"truck.oil.pressure.warning");
+        pub const OIL_PRESSURE_WARNING: Channel<bool> =
+            Channel::new(c"truck.oil.pressure.warning", INITIAL);
 
         /// Temperature of the oil in degrees celsius.
         ///
         /// Type: float
-        pub const OIL_TEMPERATURE: Channel<f32> = Channel::new(c"truck.oil.temperature");
+        pub const OIL_TEMPERATURE: Channel<f32> = Channel::new(c"truck.oil.temperature", INITIAL);
 
         /// Temperature of the water in degrees celsius.
         ///
         /// Type: float
-        pub const WATER_TEMPERATURE: Channel<f32> = Channel::new(c"truck.water.temperature");
+        pub const WATER_TEMPERATURE: Channel<f32> =
+            Channel::new(c"truck.water.temperature", INITIAL);
 
         /// Is the water temperature warning active?
         ///
         /// Type: bool
         pub const WATER_TEMPERATURE_WARNING: Channel<bool> =
-            Channel::new(c"truck.water.temperature.warning");
+            Channel::new(c"truck.water.temperature.warning", INITIAL);
 
         /// Voltage of the battery in volts.
         ///
         /// Type: float
-        pub const BATTERY_VOLTAGE: Channel<f32> = Channel::new(c"truck.battery.voltage");
+        pub const BATTERY_VOLTAGE: Channel<f32> = Channel::new(c"truck.battery.voltage", INITIAL);
 
         /// Is the battery voltage/not charging warning active?
         ///
         /// Type: bool
         pub const BATTERY_VOLTAGE_WARNING: Channel<bool> =
-            Channel::new(c"truck.battery.voltage.warning");
+            Channel::new(c"truck.battery.voltage.warning", INITIAL);
 
         /// Is the electric enabled?
         ///
         /// Type: bool
-        pub const ELECTRIC_ENABLED: Channel<bool> = Channel::new(c"truck.electric.enabled");
+        pub const ELECTRIC_ENABLED: Channel<bool> =
+            Channel::new(c"truck.electric.enabled", INITIAL);
 
         /// Is the engine enabled?
         ///
         /// Type: bool
-        pub const ENGINE_ENABLED: Channel<bool> = Channel::new(c"truck.engine.enabled");
+        pub const ENGINE_ENABLED: Channel<bool> = Channel::new(c"truck.engine.enabled", INITIAL);
 
         /// Is the left blinker enabled?
         ///
@@ -697,7 +777,7 @@ pub mod channels {
         /// and ignores enable state of electric).
         ///
         /// Type: bool
-        pub const LBLINKER: Channel<bool> = Channel::new(c"truck.lblinker");
+        pub const LBLINKER: Channel<bool> = Channel::new(c"truck.lblinker", INITIAL);
 
         /// Is the right blinker enabled?
         ///
@@ -707,7 +787,7 @@ pub mod channels {
         /// and ignores enable state of electric).
         ///
         /// Type: bool
-        pub const RBLINKER: Channel<bool> = Channel::new(c"truck.rblinker");
+        pub const RBLINKER: Channel<bool> = Channel::new(c"truck.rblinker", INITIAL);
 
         /// Are the hazard warning light enabled?
         ///
@@ -716,32 +796,35 @@ pub mod channels {
         /// enabled state of the light (i.e. it does not blink).
         ///
         /// Type: bool
-        pub const HAZARD_WARNING: Channel<bool> = Channel::new(c"truck.hazard.warning");
+        pub const HAZARD_WARNING: Channel<bool> =
+            Channel::new(c"truck.hazard.warning", ETS2_1_17_ATS_1_04);
 
         /// Is the light in the left blinker currently on?
         ///
         /// Type: bool
-        pub const LIGHT_LBLINKER: Channel<bool> = Channel::new(c"truck.light.lblinker");
+        pub const LIGHT_LBLINKER: Channel<bool> =
+            Channel::new(c"truck.light.lblinker", ETS2_1_04_ATS_1_00);
 
         /// Is the light in the right blinker currently on?
         ///
         /// Type: bool
-        pub const LIGHT_RBLINKER: Channel<bool> = Channel::new(c"truck.light.rblinker");
+        pub const LIGHT_RBLINKER: Channel<bool> =
+            Channel::new(c"truck.light.rblinker", ETS2_1_04_ATS_1_00);
 
         /// Are the parking lights enabled?
         ///
         /// Type: bool
-        pub const LIGHT_PARKING: Channel<bool> = Channel::new(c"truck.light.parking");
+        pub const LIGHT_PARKING: Channel<bool> = Channel::new(c"truck.light.parking", INITIAL);
 
         /// Are the low beam lights enabled?
         ///
         /// Type: bool
-        pub const LIGHT_LOW_BEAM: Channel<bool> = Channel::new(c"truck.light.beam.low");
+        pub const LIGHT_LOW_BEAM: Channel<bool> = Channel::new(c"truck.light.beam.low", INITIAL);
 
         /// Are the high beam lights enabled?
         ///
         /// Type: bool
-        pub const LIGHT_HIGH_BEAM: Channel<bool> = Channel::new(c"truck.light.beam.high");
+        pub const LIGHT_HIGH_BEAM: Channel<bool> = Channel::new(c"truck.light.beam.high", INITIAL);
 
         /// Are the auxiliary front lights active?
         ///
@@ -750,7 +833,7 @@ pub mod channels {
         /// - 2 - full state
         ///
         /// Type: u32
-        pub const LIGHT_AUX_FRONT: Channel<u32> = Channel::new(c"truck.light.aux.front");
+        pub const LIGHT_AUX_FRONT: Channel<u32> = Channel::new(c"truck.light.aux.front", INITIAL);
 
         /// Are the auxiliary roof lights active?
         ///
@@ -759,102 +842,109 @@ pub mod channels {
         /// - 2 - full state
         ///
         /// Type: u32
-        pub const LIGHT_AUX_ROOF: Channel<u32> = Channel::new(c"truck.light.aux.roof");
+        pub const LIGHT_AUX_ROOF: Channel<u32> = Channel::new(c"truck.light.aux.roof", INITIAL);
 
         /// Are the beacon lights enabled?
         ///
         /// Type: bool
-        pub const LIGHT_BEACON: Channel<bool> = Channel::new(c"truck.light.beacon");
+        pub const LIGHT_BEACON: Channel<bool> = Channel::new(c"truck.light.beacon", INITIAL);
 
         /// Is the brake light active?
         ///
         /// Type: bool
-        pub const LIGHT_BRAKE: Channel<bool> = Channel::new(c"truck.light.brake");
+        pub const LIGHT_BRAKE: Channel<bool> = Channel::new(c"truck.light.brake", INITIAL);
 
         /// Is the reverse light active?
         ///
         /// Type: bool
-        pub const LIGHT_REVERSE: Channel<bool> = Channel::new(c"truck.light.reverse");
+        pub const LIGHT_REVERSE: Channel<bool> = Channel::new(c"truck.light.reverse", INITIAL);
 
         /// Are the wipers enabled?
         ///
         /// Type: bool
-        pub const WIPERS: Channel<bool> = Channel::new(c"truck.wipers");
+        pub const WIPERS: Channel<bool> = Channel::new(c"truck.wipers", INITIAL);
 
         /// Intensity of the dashboard backlight as factor <0;1>
         ///
         /// Type: float
-        pub const DASHBOARD_BACKLIGHT: Channel<f32> = Channel::new(c"truck.dashboard.backlight");
+        pub const DASHBOARD_BACKLIGHT: Channel<f32> =
+            Channel::new(c"truck.dashboard.backlight", INITIAL);
 
         /// Is the differential lock enabled?
         ///
         /// Type: bool
-        pub const DIFFERENTIAL_LOCK: Channel<bool> = Channel::new(c"truck.differential_lock");
+        pub const DIFFERENTIAL_LOCK: Channel<bool> =
+            Channel::new(c"truck.differential_lock", ETS2_1_17_ATS_1_04);
 
         /// Is the lift axle control set to lifted state?
         ///
         /// Type: bool
-        pub const LIFT_AXLE: Channel<bool> = Channel::new(c"truck.lift_axle");
+        pub const LIFT_AXLE: Channel<bool> = Channel::new(c"truck.lift_axle", ETS2_1_17_ATS_1_04);
 
         /// Is the lift axle indicator lit?
         ///
         /// Type: bool
-        pub const LIFT_AXLE_INDICATOR: Channel<bool> = Channel::new(c"truck.lift_axle.indicator");
+        pub const LIFT_AXLE_INDICATOR: Channel<bool> =
+            Channel::new(c"truck.lift_axle.indicator", ETS2_1_17_ATS_1_04);
 
         /// Is the trailer lift axle control set to lifted state?
         ///
         /// Type: bool
-        pub const TRAILER_LIFT_AXLE: Channel<bool> = Channel::new(c"truck.trailer.lift_axle");
+        pub const TRAILER_LIFT_AXLE: Channel<bool> =
+            Channel::new(c"truck.trailer.lift_axle", ETS2_1_17_ATS_1_04);
 
         /// Is the trailer lift axle indicator lit?
         ///
         /// Type: bool
         pub const TRAILER_LIFT_AXLE_INDICATOR: Channel<bool> =
-            Channel::new(c"truck.trailer.lift_axle.indicator");
+            Channel::new(c"truck.trailer.lift_axle.indicator", ETS2_1_17_ATS_1_04);
 
         /// Wear of the engine accessory as <0;1>
         ///
         /// Type: float
-        pub const WEAR_ENGINE: Channel<f32> = Channel::new(c"truck.wear.engine");
+        pub const WEAR_ENGINE: Channel<f32> = Channel::new(c"truck.wear.engine", INITIAL);
 
         /// Wear of the transmission accessory as <0;1>
         ///
         /// Type: float
-        pub const WEAR_TRANSMISSION: Channel<f32> = Channel::new(c"truck.wear.transmission");
+        pub const WEAR_TRANSMISSION: Channel<f32> =
+            Channel::new(c"truck.wear.transmission", INITIAL);
 
         /// Wear of the cabin accessory as <0;1>
         ///
         /// Type: float
-        pub const WEAR_CABIN: Channel<f32> = Channel::new(c"truck.wear.cabin");
+        pub const WEAR_CABIN: Channel<f32> = Channel::new(c"truck.wear.cabin", INITIAL);
 
         /// Wear of the chassis accessory as <0;1>
         ///
         /// Type: float
-        pub const WEAR_CHASSIS: Channel<f32> = Channel::new(c"truck.wear.chassis");
+        pub const WEAR_CHASSIS: Channel<f32> = Channel::new(c"truck.wear.chassis", INITIAL);
 
         /// Average wear across the wheel accessories as <0;1>
         ///
         /// Type: float
-        pub const WEAR_WHEELS: Channel<f32> = Channel::new(c"truck.wear.wheels");
+        pub const WEAR_WHEELS: Channel<f32> = Channel::new(c"truck.wear.wheels", INITIAL);
 
         /// The value of the odometer in km.
         ///
         /// Type: float
-        pub const ODOMETER: Channel<f32> = Channel::new(c"truck.odometer");
+        pub const ODOMETER: Channel<f32> = Channel::new(c"truck.odometer", INITIAL);
 
         /// The value of truck's navigation distance (in meters).
         ///
         /// This is the value used by the advisor.
         ///
         /// Type: float
-        pub const NAVIGATION_DISTANCE: Channel<f32> = Channel::new(c"truck.navigation.distance");
+        pub const NAVIGATION_DISTANCE: Channel<f32> =
+            Channel::new(c"truck.navigation.distance", ETS2_1_12_ATS_1_00);
 
         /// The value of truck's navigation eta (in second).
         ///
         /// This is the value used by the advisor.
         ///
         /// Type: float
-        pub const NAVIGATION_TIME: Channel<f32> = Channel::new(c"truck.navigation.time");
+        pub const NAVIGATION_TIME: Channel<f32> =
+            Channel::new(c"truck.navigation.time", ETS2_1_12_ATS_1_00);
 
         /// The value of truck's navigation speed limit (in m/s).
         ///
@@ -863,26 +953,28 @@ pub mod channels {
         ///
         /// Type: float
         pub const NAVIGATION_SPEED_LIMIT: Channel<f32> =
-            Channel::new(c"truck.navigation.speed.limit");
+            Channel::new(c"truck.navigation.speed.limit", ETS2_1_12_ATS_1_00);
 
         /// Vertical displacement of the wheel from its
         /// axis in meters.
         ///
         /// Type: indexed float
         pub const WHEEL_SUSP_DEFLECTION: Channel<f32> =
-            Channel::indexed(c"truck.wheel.suspension.deflection");
+            Channel::indexed(c"truck.wheel.suspension.deflection", INITIAL);
 
         /// Is the wheel in contact with ground?
         ///
         /// Type: indexed bool
-        pub const WHEEL_ON_GROUND: Channel<bool> = Channel::indexed(c"truck.wheel.on_ground");
+        pub const WHEEL_ON_GROUND: Channel<bool> =
+            Channel::indexed(c"truck.wheel.on_ground", INITIAL);
 
         /// Substance below the whell.
         ///
         /// Index of substance as delivered trough SUBSTANCE config.
         ///
         /// Type: indexed u32
-        pub const WHEEL_SUBSTANCE: Channel<u32> = Channel::indexed(c"truck.wheel.substance");
+        pub const WHEEL_SUBSTANCE: Channel<u32> =
+            Channel::indexed(c"truck.wheel.substance", INITIAL);
 
         /// Angular velocity of the wheel in rotations per
         /// second.
@@ -890,7 +982,8 @@ pub mod channels {
         /// Positive velocity corresponds to forward movement.
         ///
         /// Type: indexed float
-        pub const WHEEL_VELOCITY: Channel<f32> = Channel::indexed(c"truck.wheel.angular_velocity");
+        pub const WHEEL_VELOCITY: Channel<f32> =
+            Channel::indexed(c"truck.wheel.angular_velocity", INITIAL);
 
         /// Steering rotation of the wheel in rotations.
         ///
@@ -901,7 +994,7 @@ pub mod channels {
         /// Set to zero for non-steered wheels.
         ///
         /// Type: indexed float
-        pub const WHEEL_STEERING: Channel<f32> = Channel::indexed(c"truck.wheel.steering");
+        pub const WHEEL_STEERING: Channel<f32> = Channel::indexed(c"truck.wheel.steering", INITIAL);
 
         /// Rolling rotation of the wheel in rotations.
         ///
@@ -909,7 +1002,7 @@ pub mod channels {
         /// increase corresponds to forward movement.
         ///
         /// Type: indexed float
-        pub const WHEEL_ROTATION: Channel<f32> = Channel::indexed(c"truck.wheel.rotation");
+        pub const WHEEL_ROTATION: Channel<f32> = Channel::indexed(c"truck.wheel.rotation", INITIAL);
 
         /// Lift state of the wheel <0;1>
         ///
@@ -922,7 +1015,8 @@ pub mod channels {
         /// Set to zero or not provided for non-liftable axles.
         ///
         /// Type: indexed float
-        pub const WHEEL_LIFT: Channel<f32> = Channel::indexed(c"truck.wheel.lift");
+        pub const WHEEL_LIFT: Channel<f32> =
+            Channel::indexed(c"truck.wheel.lift", ETS2_1_10_ATS_1_00);
 
         /// Vertical displacement of the wheel axle
         /// from its normal position in meters as result of
@@ -933,7 +1027,8 @@ pub mod channels {
         /// Set to zero or not provided for non-liftable axles.
         ///
         /// Type: indexed float
-        pub const WHEEL_LIFT_OFFSET: Channel<f32> = Channel::indexed(c"truck.wheel.lift.offset");
+        pub const WHEEL_LIFT_OFFSET: Channel<f32> =
+            Channel::indexed(c"truck.wheel.lift.offset", ETS2_1_10_ATS_1_00);
 
         /// Every truck channel in the order used by the SDK 1.14 header.
         ///
@@ -1030,6 +1125,7 @@ pub mod channels {
     /// Channels declared by `scssdk_telemetry_trailer_common_channels.h`.
     pub mod trailer {
         use super::super::{AnyChannel, Channel};
+        use super::{ETS2_1_14_ATS_1_01, ETS2_1_18_ATS_1_05, INITIAL};
 
         /// Number of typed descriptors in this catalog group.
         pub const COUNT: usize = 18;
@@ -1040,7 +1136,7 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const CONNECTED: Channel<bool> = Channel::new(c"trailer.connected");
+        pub const CONNECTED: Channel<bool> = Channel::new(c"trailer.connected", INITIAL);
 
         /// How much is the cargo damaged that is loaded to this trailer in <0.0, 1.0> range.
         ///
@@ -1048,7 +1144,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const CARGO_DAMAGE: Channel<f32> = Channel::new(c"trailer.cargo.damage");
+        pub const CARGO_DAMAGE: Channel<f32> =
+            Channel::new(c"trailer.cargo.damage", ETS2_1_14_ATS_1_01);
 
         /// world placement trailer telemetry.
         ///
@@ -1057,7 +1154,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const WORLD_PLACEMENT: Channel<crate::DPlacement> =
-            Channel::new(c"trailer.world.placement");
+            Channel::new(c"trailer.world.placement", INITIAL);
 
         /// local linear velocity trailer telemetry.
         ///
@@ -1066,7 +1163,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const LOCAL_LINEAR_VELOCITY: Channel<crate::FVector> =
-            Channel::new(c"trailer.velocity.linear");
+            Channel::new(c"trailer.velocity.linear", INITIAL);
 
         /// local angular velocity trailer telemetry.
         ///
@@ -1075,7 +1172,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const LOCAL_ANGULAR_VELOCITY: Channel<crate::FVector> =
-            Channel::new(c"trailer.velocity.angular");
+            Channel::new(c"trailer.velocity.angular", INITIAL);
 
         /// local linear acceleration trailer telemetry.
         ///
@@ -1084,7 +1181,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const LOCAL_LINEAR_ACCELERATION: Channel<crate::FVector> =
-            Channel::new(c"trailer.acceleration.linear");
+            Channel::new(c"trailer.acceleration.linear", INITIAL);
 
         /// local angular acceleration trailer telemetry.
         ///
@@ -1093,7 +1190,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const LOCAL_ANGULAR_ACCELERATION: Channel<crate::FVector> =
-            Channel::new(c"trailer.acceleration.angular");
+            Channel::new(c"trailer.acceleration.angular", INITIAL);
 
         /// wear body trailer telemetry.
         ///
@@ -1101,7 +1198,7 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WEAR_BODY: Channel<f32> = Channel::new(c"trailer.wear.body");
+        pub const WEAR_BODY: Channel<f32> = Channel::new(c"trailer.wear.body", ETS2_1_18_ATS_1_05);
 
         /// wear chassis trailer telemetry.
         ///
@@ -1109,7 +1206,7 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WEAR_CHASSIS: Channel<f32> = Channel::new(c"trailer.wear.chassis");
+        pub const WEAR_CHASSIS: Channel<f32> = Channel::new(c"trailer.wear.chassis", INITIAL);
 
         /// wear wheels trailer telemetry.
         ///
@@ -1117,7 +1214,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WEAR_WHEELS: Channel<f32> = Channel::new(c"trailer.wear.wheels");
+        pub const WEAR_WHEELS: Channel<f32> =
+            Channel::new(c"trailer.wear.wheels", ETS2_1_14_ATS_1_01);
 
         /// wheel susp deflection trailer telemetry.
         ///
@@ -1126,7 +1224,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const WHEEL_SUSP_DEFLECTION: Channel<f32> =
-            Channel::indexed(c"trailer.wheel.suspension.deflection");
+            Channel::indexed(c"trailer.wheel.suspension.deflection", INITIAL);
 
         /// wheel on ground trailer telemetry.
         ///
@@ -1134,7 +1232,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WHEEL_ON_GROUND: Channel<bool> = Channel::indexed(c"trailer.wheel.on_ground");
+        pub const WHEEL_ON_GROUND: Channel<bool> =
+            Channel::indexed(c"trailer.wheel.on_ground", INITIAL);
 
         /// wheel substance trailer telemetry.
         ///
@@ -1142,7 +1241,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WHEEL_SUBSTANCE: Channel<u32> = Channel::indexed(c"trailer.wheel.substance");
+        pub const WHEEL_SUBSTANCE: Channel<u32> =
+            Channel::indexed(c"trailer.wheel.substance", INITIAL);
 
         /// wheel velocity trailer telemetry.
         ///
@@ -1151,7 +1251,7 @@ pub mod channels {
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
         pub const WHEEL_VELOCITY: Channel<f32> =
-            Channel::indexed(c"trailer.wheel.angular_velocity");
+            Channel::indexed(c"trailer.wheel.angular_velocity", INITIAL);
 
         /// wheel steering trailer telemetry.
         ///
@@ -1159,7 +1259,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WHEEL_STEERING: Channel<f32> = Channel::indexed(c"trailer.wheel.steering");
+        pub const WHEEL_STEERING: Channel<f32> =
+            Channel::indexed(c"trailer.wheel.steering", INITIAL);
 
         /// wheel rotation trailer telemetry.
         ///
@@ -1167,7 +1268,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WHEEL_ROTATION: Channel<f32> = Channel::indexed(c"trailer.wheel.rotation");
+        pub const WHEEL_ROTATION: Channel<f32> =
+            Channel::indexed(c"trailer.wheel.rotation", INITIAL);
 
         /// wheel lift trailer telemetry.
         ///
@@ -1175,7 +1277,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WHEEL_LIFT: Channel<f32> = Channel::indexed(c"trailer.wheel.lift");
+        pub const WHEEL_LIFT: Channel<f32> =
+            Channel::indexed(c"trailer.wheel.lift", ETS2_1_14_ATS_1_01);
 
         /// wheel lift offset trailer telemetry.
         ///
@@ -1183,7 +1286,8 @@ pub mod channels {
         ///
         /// For trailer indices above zero, the plugin framework derives the
         /// `trailer.[index].*` channel name described by the official SDK.
-        pub const WHEEL_LIFT_OFFSET: Channel<f32> = Channel::indexed(c"trailer.wheel.lift.offset");
+        pub const WHEEL_LIFT_OFFSET: Channel<f32> =
+            Channel::indexed(c"trailer.wheel.lift.offset", ETS2_1_14_ATS_1_01);
 
         /// Every first-trailer channel in SDK 1.14 header order.
         ///
@@ -1216,6 +1320,7 @@ pub mod channels {
     /// Channels declared by `scssdk_telemetry_job_common_channels.h`.
     pub mod job {
         use super::super::{AnyChannel, Channel};
+        use super::ETS2_1_14_ATS_1_01;
 
         /// Number of typed descriptors in this catalog group.
         pub const COUNT: usize = 1;
@@ -1223,7 +1328,8 @@ pub mod channels {
         /// The total damage of the cargo in range 0.0 to 1.0.
         ///
         /// Type: float
-        pub const CARGO_DAMAGE: Channel<f32> = Channel::new(c"job.cargo.damage");
+        pub const CARGO_DAMAGE: Channel<f32> =
+            Channel::new(c"job.cargo.damage", ETS2_1_14_ATS_1_01);
 
         /// Every job channel in SDK 1.14 header order.
         pub const ALL: [AnyChannel; COUNT] = [CARGO_DAMAGE.erase()];
@@ -1365,6 +1471,26 @@ pub mod channels {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GameSchemaVersion;
+
+    fn assert_since<T: ChannelValue>(
+        channel: Channel<T>,
+        ets2: Option<GameSchemaVersion>,
+        ats: Option<GameSchemaVersion>,
+    ) {
+        assert_eq!(
+            channel.availability().available_since_ets2(),
+            ets2,
+            "{:?}",
+            channel.name()
+        );
+        assert_eq!(
+            channel.availability().available_since_ats(),
+            ats,
+            "{:?}",
+            channel.name()
+        );
+    }
 
     fn assert_catalog_matches_raw(typed: &[AnyChannel], raw: &[&[u8]]) {
         assert_eq!(typed.len(), raw.len());
@@ -1457,6 +1583,10 @@ mod tests {
                 name: c"truck.world.placement",
                 value_type: ValueType::DPlacement,
                 indexed: false,
+                availability: GameSchemaAvailability::new(
+                    Some(crate::game::ets2::V1_00),
+                    Some(crate::game::ats::V1_00),
+                ),
             }
         );
         assert_eq!(
@@ -1465,6 +1595,10 @@ mod tests {
                 name: c"truck.wheel.rotation",
                 value_type: ValueType::F32,
                 indexed: true,
+                availability: GameSchemaAvailability::new(
+                    Some(crate::game::ets2::V1_00),
+                    Some(crate::game::ats::V1_00),
+                ),
             }
         );
         assert_eq!(
@@ -1473,8 +1607,143 @@ mod tests {
                 name: c"trailer.wheel.on_ground",
                 value_type: ValueType::Bool,
                 indexed: true,
+                availability: GameSchemaAvailability::new(
+                    Some(crate::game::ets2::V1_00),
+                    Some(crate::game::ats::V1_00),
+                ),
             }
         );
         assert_eq!(channels::job::CARGO_DAMAGE.name(), c"job.cargo.damage");
+    }
+
+    #[test]
+    fn channel_availability_follows_early_game_schema_history() {
+        use channels::{common, truck};
+
+        // Early ETS2 additions are preserved even though the oldest archived
+        // downloadable bundle (SDK 1.0) already reports schema 1.05.
+        assert_since(
+            truck::BRAKE_AIR_PRESSURE_EMERGENCY,
+            Some(crate::game::ets2::V1_01),
+            Some(crate::game::ats::V1_00),
+        );
+        assert_since(
+            truck::CABIN_OFFSET,
+            Some(crate::game::ets2::V1_02),
+            Some(crate::game::ats::V1_00),
+        );
+        for channel in [truck::LIGHT_LBLINKER, truck::LIGHT_RBLINKER] {
+            assert_since(
+                channel,
+                Some(crate::game::ets2::V1_04),
+                Some(crate::game::ats::V1_00),
+            );
+        }
+
+        for channel in [
+            common::GAME_TIME.requesting::<i32>(),
+            common::NEXT_REST_STOP,
+        ] {
+            assert_since(
+                channel,
+                Some(crate::game::ets2::V1_09),
+                Some(crate::game::ats::V1_00),
+            );
+        }
+        for channel in [truck::WHEEL_LIFT, truck::WHEEL_LIFT_OFFSET] {
+            assert_since(
+                channel,
+                Some(crate::game::ets2::V1_10),
+                Some(crate::game::ats::V1_00),
+            );
+        }
+        assert_since(
+            truck::DISPLAYED_GEAR,
+            Some(crate::game::ets2::V1_11),
+            Some(crate::game::ats::V1_00),
+        );
+        for channel in [
+            truck::FUEL_RANGE,
+            truck::NAVIGATION_DISTANCE,
+            truck::NAVIGATION_TIME,
+            truck::NAVIGATION_SPEED_LIMIT,
+        ] {
+            assert_since(
+                channel,
+                Some(crate::game::ets2::V1_12),
+                Some(crate::game::ats::V1_00),
+            );
+        }
+        for channel in [
+            truck::ADBLUE,
+            truck::ADBLUE_WARNING.requesting::<f32>(),
+            truck::ADBLUE_AVERAGE_CONSUMPTION,
+        ] {
+            assert_since(channel, Some(crate::game::ets2::V1_12), None);
+        }
+    }
+
+    #[test]
+    fn channel_availability_follows_later_game_schema_history() {
+        use channels::{common, job, trailer, truck};
+
+        for channel in [
+            trailer::CARGO_DAMAGE,
+            trailer::WEAR_WHEELS,
+            trailer::WHEEL_LIFT,
+            trailer::WHEEL_LIFT_OFFSET,
+            job::CARGO_DAMAGE,
+        ] {
+            assert_since(
+                channel,
+                Some(crate::game::ets2::V1_14),
+                Some(crate::game::ats::V1_01),
+            );
+        }
+        for channel in [
+            truck::HAZARD_WARNING,
+            truck::DIFFERENTIAL_LOCK,
+            truck::LIFT_AXLE,
+            truck::LIFT_AXLE_INDICATOR,
+            truck::TRAILER_LIFT_AXLE,
+            truck::TRAILER_LIFT_AXLE_INDICATOR,
+        ] {
+            assert_since(
+                channel,
+                Some(crate::game::ets2::V1_17),
+                Some(crate::game::ats::V1_04),
+            );
+        }
+        assert_since(
+            common::MULTIPLAYER_TIME_OFFSET,
+            Some(crate::game::ets2::V1_18),
+            Some(crate::game::ats::V1_05),
+        );
+        assert_since(
+            trailer::WEAR_BODY,
+            Some(crate::game::ets2::V1_18),
+            Some(crate::game::ats::V1_05),
+        );
+
+        assert_eq!(
+            channels::MULTI_TRAILER_AVAILABILITY,
+            GameSchemaAvailability::new(
+                Some(crate::game::ets2::V1_14),
+                Some(crate::game::ats::V1_01),
+            )
+        );
+        assert!(
+            channels::ALL
+                .iter()
+                .all(|channel| channel.availability().available_since_ets2().is_some())
+        );
+        assert_eq!(
+            channels::ALL
+                .iter()
+                .filter(|channel| channel.availability().available_since_ats().is_none())
+                .count(),
+            3,
+            "only the three AdBlue channels are explicitly unsupported by ATS",
+        );
     }
 }

@@ -69,6 +69,17 @@ use syn::{Expr, parse_macro_input};
 ///         scs_sdk_plugin::PluginMetadata::new("My Plugin", env!("CARGO_PKG_VERSION"))
 ///     }
 ///
+///     fn compatibility(&self) -> scs_sdk_plugin::PluginCompatibility {
+///         use scs_sdk_plugin::sdk::{TelemetryApiVersion, game};
+///         use scs_sdk_plugin::{Game, GameCompatibility, PluginCompatibility};
+///
+///         const GAMES: &[GameCompatibility] = &[GameCompatibility::new(
+///             Game::EuroTruckSimulator2,
+///             game::ets2::V1_00,
+///         )];
+///         PluginCompatibility::new(TelemetryApiVersion::V1_00, GAMES)
+///     }
+///
 ///     fn initialize(
 ///         &mut self,
 ///         _context: &mut scs_sdk_plugin::PluginContext<'_>,
