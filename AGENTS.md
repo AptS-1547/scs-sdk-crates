@@ -32,7 +32,8 @@ The reusable workspace consists of these layers:
             |
     scs-sdk-plugin-macros   Telemetry and Input entry-point proc macros
             |
-    examples/telemetry-plugin and examples/input-plugin
+    examples/telemetry-plugin, examples/input-plugin, and
+    examples/input-semantical-plugin
                             real safe application-boundary examples
 
 Dependency and ownership rules:
@@ -60,6 +61,9 @@ Dependency and ownership rules:
 - examples/input-plugin is the safe Input API boundary and artifact fixture. It
   registers one deterministic generic device explicitly and must remain free of
   real hardware, network, bridge, dispatcher, or other product behavior.
+- examples/input-semantical-plugin is the isolated real-game fixture for the
+  semantical device class. It registers the official sample's `light` bool mix
+  explicitly and must not be merged into the generic binding fixture.
 - Do not create dependency cycles or let higher-level concerns leak into lower
   layers. The intended direction is sys -> sdk -> plugin -> application.
 
@@ -257,6 +261,10 @@ For changes to SDK coverage:
   not re-sign the ETS2 application bundle or replace SCS's Developer ID identity.
 - Avoid installing two plugin filenames side by side. The installer may remove
   only the exact known legacy example filename after the new artifact verifies.
+- The generic and semantical Input E2E examples are mutually exclusive
+  installations. Their installers may remove only each other's exact known
+  filenames after the newly selected artifact has passed format, signature,
+  and export validation.
 - The normal and fallback E2E examples are mutually exclusive installations.
   Their installers may remove only each other's exact known filenames after the
   newly selected artifact has passed format, signature, and export validation.
@@ -341,12 +349,15 @@ For release artifact or export changes, also run the applicable platform scripts
 
     scripts/build-windows-plugin.sh
     scripts/build-windows-input-plugin.sh
+    scripts/build-windows-input-semantical-plugin.sh
     scripts/build-windows-plugin-macro-fixture.sh
     scripts/build-linux-plugin.sh
     scripts/build-linux-input-plugin.sh
+    scripts/build-linux-input-semantical-plugin.sh
     scripts/build-linux-plugin-macro-fixture.sh
     scripts/build-macos-plugin.sh
     scripts/build-macos-input-plugin.sh
+    scripts/build-macos-input-semantical-plugin.sh
     scripts/build-macos-plugin-macro-fixture.sh
 
 If a toolchain or platform check was not run, report that fact explicitly. Do not

@@ -156,10 +156,11 @@ scripts/install-macos-input-plugin.sh
 ```
 
 The installer preserves the release artifact, removes quarantine from a private
-copy, ad-hoc signs it, verifies the exact two Input exports, replaces only the
-exact Input example filename, and verifies the installed destination. It leaves
-Telemetry fixtures and unrelated plugins intact because the two SCS interfaces
-may coexist.
+copy, ad-hoc signs it, verifies the exact two Input exports, replaces the exact
+generic Input example filename, verifies the installed destination, and then
+removes only the exact semantical Input fixture filename. It leaves Telemetry
+fixtures and unrelated plugins intact because the two SCS interfaces may
+coexist.
 
 For manual installation on another platform, copy the corresponding artifact
 into the game's native plugin directory:
@@ -170,9 +171,10 @@ into the game's native plugin directory:
 | Linux | `<GAME_INSTALL>/bin/linux_x64/plugins/` |
 | macOS | `<GAME_APP>/Contents/MacOS/plugins/` |
 
-Do not install two copies of the Input example under different filenames. A
-Telemetry example may remain installed because it exports a different loader
-interface.
+The generic and semantical Input examples are mutually exclusive installations
+because both export the same Input loader interface. Do not keep either fixture
+under renamed duplicate filenames. A Telemetry example may remain installed
+because it exports a different loader interface.
 
 After startup, check the game's `game.log.txt` for the library load and these
 runtime markers:

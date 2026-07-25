@@ -1,0 +1,19 @@
+[package]
+name = "scs-sdk-input-semantical-example"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Safe Rust semantical input-device fixture for the SCS SDK crates"
+publish = false
+
+[lib]
+name = "scs_sdk_input_semantical_example"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+scs-sdk-plugin = { path = "../../crates/scs-sdk-plugin" }
+
+[lints]
+workspace = true

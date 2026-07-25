@@ -147,8 +147,9 @@ scripts/install-macos-input-plugin.sh
 ```
 
 installer 会保留 release artifact，在私有副本上移除 quarantine、应用 ad-hoc 签名、
-验证精确的两个 Input export，只替换 Input 示例的精确文件名，并再次验证安装目标。
-Telemetry fixture 与无关插件会保持原样，因为两套 SCS 接口可以共存。
+验证精确的两个 Input export、替换 Generic Input 示例的精确文件名、再次验证安装目标，
+然后只删除 Semantical Input fixture 的精确文件名。Telemetry fixture 与无关插件会
+保持原样，因为两套 SCS 接口可以共存。
 
 其他平台手动安装时，把对应产物复制到游戏的原生 plugin 目录：
 
@@ -158,8 +159,9 @@ Telemetry fixture 与无关插件会保持原样，因为两套 SCS 接口可以
 | Linux | `<GAME_INSTALL>/bin/linux_x64/plugins/` |
 | macOS | `<GAME_APP>/Contents/MacOS/plugins/` |
 
-不要用不同文件名同时安装两份 Input 示例。Telemetry 示例可以保留，因为它导出的是
-另一套 loader 接口。
+Generic 与 Semantical Input example 导出相同的 Input loader 接口，因此是互斥安装。
+不要把任一 fixture 重命名后并排保留。Telemetry 示例可以保留，因为它导出的是另一套
+loader 接口。
 
 游戏启动后，在 `game.log.txt` 中确认 library load 与以下 runtime marker：
 

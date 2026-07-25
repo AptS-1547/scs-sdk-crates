@@ -35,6 +35,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scs-sdk-input-semantical-example"
+version = "0.1.0"
+dependencies = [
+ "scs-sdk-plugin",
+]
+
+[[package]]
 name = "scs-sdk-plugin"
 version = "0.1.0"
 dependencies = [

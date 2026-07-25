@@ -7,6 +7,7 @@ on:
       - '.cargo/**'
       - '.github/workflows/rust.yml'
       - 'examples/input-plugin/**'
+      - 'examples/input-semantical-plugin/**'
       - 'examples/telemetry-plugin/**'
       - 'examples/telemetry-fallback-plugin/**'
       - 'crates/scs-sdk-sys/**'
@@ -30,6 +31,7 @@ on:
       - '.cargo/**'
       - '.github/workflows/rust.yml'
       - 'examples/input-plugin/**'
+      - 'examples/input-semantical-plugin/**'
       - 'examples/telemetry-plugin/**'
       - 'examples/telemetry-fallback-plugin/**'
       - 'crates/scs-sdk-sys/**'
@@ -196,6 +198,9 @@ jobs:
       - name: Build and verify Windows input plugin
         run: scripts/build-windows-input-plugin.sh
 
+      - name: Build and verify Windows semantical input plugin
+        run: scripts/build-windows-input-semantical-plugin.sh
+
       - name: Build and verify Windows macro fixture
         run: scripts/build-windows-plugin-macro-fixture.sh
 
@@ -214,6 +219,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: target/x86_64-pc-windows-gnu/release/scs_sdk_input_example.dll
+
+      - name: Upload Windows semantical input plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: scs-sdk-input-semantical-example-windows-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-pc-windows-gnu/release/scs_sdk_input_semantical_example.dll
 
   linux-plugin:
     name: Linux x86-64 plugin (glibc 2.17)
@@ -250,6 +263,9 @@ jobs:
       - name: Build and verify Linux input plugin
         run: scripts/build-linux-input-plugin.sh
 
+      - name: Build and verify Linux semantical input plugin
+        run: scripts/build-linux-input-semantical-plugin.sh
+
       - name: Build and verify Linux macro fixture
         run: scripts/build-linux-plugin-macro-fixture.sh
 
@@ -268,6 +284,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: target/x86_64-unknown-linux-gnu/release/libscs_sdk_input_example.so
+
+      - name: Upload Linux semantical input plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: scs-sdk-input-semantical-example-linux-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-unknown-linux-gnu/release/libscs_sdk_input_semantical_example.so
 
   macos-plugin:
     name: macOS x86-64 plugin
@@ -297,6 +321,9 @@ jobs:
       - name: Build and verify macOS input plugin
         run: scripts/build-macos-input-plugin.sh
 
+      - name: Build and verify macOS semantical input plugin
+        run: scripts/build-macos-input-semantical-plugin.sh
+
       - name: Build and verify macOS fallback E2E plugin
         run: scripts/build-macos-fallback-plugin.sh
 
@@ -318,6 +345,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: target/x86_64-apple-darwin/release/libscs_sdk_input_example.dylib
+
+      - name: Upload macOS semantical input plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: scs-sdk-input-semantical-example-macos-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-apple-darwin/release/libscs_sdk_input_semantical_example.dylib
 
       - name: Upload macOS fallback E2E plugin
         uses: actions/upload-artifact@v7

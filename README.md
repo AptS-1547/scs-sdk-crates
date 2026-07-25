@@ -104,7 +104,9 @@ scs_telemetry_shutdown
 
 Continue with the [safe plugin framework guide](crates/scs-sdk-plugin/), the
 [real telemetry example](examples/telemetry-plugin/), or the
-[input-device example](examples/input-plugin/).
+[generic input-device example](examples/input-plugin/). The isolated
+[semantical input fixture](examples/input-semantical-plugin/) demonstrates
+direct game-mix routing without a binding UI step.
 
 ## Proof before promises
 
@@ -152,8 +154,9 @@ scs-sdk                 no_std values, descriptors, catalogs, decoding
         ▼
 scs-sdk-sys             no_std x86-64 C ABI definitions
 
-examples/input-plugin uses the same layers through the independent InputPlugin
-runtime. scs-sdk-plugin-macros generates the two exports for each selected API.
+examples/input-plugin and examples/input-semantical-plugin use the same layers
+through the independent InputPlugin runtime. scs-sdk-plugin-macros generates
+the two exports for each selected API.
 ```
 
 | Layer | Owns | Does not own |
@@ -164,6 +167,7 @@ runtime. scs-sdk-plugin-macros generates the two exports for each selected API.
 | [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | Expansion of safe constructors into telemetry and/or input loader exports. | Runtime policy or product behavior. |
 | [`examples/telemetry-plugin`](examples/telemetry-plugin/) | A real safe plugin and end-to-end boundary fixture. | Product functionality. |
 | [`examples/input-plugin`](examples/input-plugin/) | A safe generic input device with typed bool/float events. | Hardware integration or product functionality. |
+| [`examples/input-semantical-plugin`](examples/input-semantical-plugin/) | An isolated safe semantical device that drives the official `light` bool mix directly. | Generic bindings or product functionality. |
 
 The Cargo dependency direction remains:
 
@@ -221,6 +225,12 @@ device/input names, per-device index bounds, registered value types, panic
 containment, and stale contexts from partially failed initialization. The safe
 example and isolated macro fixtures contain no application `unsafe`.
 
+The independent semantical fixture follows the official SDK sample's `light`
+bool input. A fresh controls file references `semantical.light?0`, so the game
+activates and consumes the device without a user binding. Its deterministic
+false/true cycle provides direct real-game evidence for the second device
+class without mixing that behavior into the generic artifact.
+
 ## Contracts kept explicit
 
 - **Subscriptions are declared, not inferred.** Implementing a callback does
@@ -277,10 +287,13 @@ target directory or filename extension.
 | --- | --- | --- | --- |
 | Windows | x86-64 GNU | `scripts/build-windows-plugin.sh` | `scs_sdk_telemetry_example.dll` |
 | Windows Input | x86-64 GNU | `scripts/build-windows-input-plugin.sh` | `scs_sdk_input_example.dll` |
+| Windows Semantical Input | x86-64 GNU | `scripts/build-windows-input-semantical-plugin.sh` | `scs_sdk_input_semantical_example.dll` |
 | Linux | x86-64, glibc 2.17 floor via Zig | `scripts/build-linux-plugin.sh` | `libscs_sdk_telemetry_example.so` |
 | Linux Input | x86-64, glibc 2.17 floor via Zig | `scripts/build-linux-input-plugin.sh` | `libscs_sdk_input_example.so` |
+| Linux Semantical Input | x86-64, glibc 2.17 floor via Zig | `scripts/build-linux-input-semantical-plugin.sh` | `libscs_sdk_input_semantical_example.so` |
 | macOS | x86-64, including Apple Silicon through Rosetta | `scripts/build-macos-plugin.sh` | `libscs_sdk_telemetry_example.dylib` |
 | macOS Input | x86-64, including Apple Silicon through Rosetta | `scripts/build-macos-input-plugin.sh` | `libscs_sdk_input_example.dylib` |
+| macOS Semantical Input | x86-64, including Apple Silicon through Rosetta | `scripts/build-macos-input-semantical-plugin.sh` | `libscs_sdk_input_semantical_example.dylib` |
 
 Verification checks the native format, x86-64 architecture, and exact dynamic
 export set. macOS builds additionally receive and verify an ad-hoc signature
@@ -297,6 +310,8 @@ crates/scs-sdk/                 safe no_std typed wrapper and catalogs
 crates/scs-sdk-plugin/          safe lifecycle/runtime/framework
 crates/scs-sdk-plugin-macros/   exported-entry-point proc macro
 examples/input-plugin/          safe generic input-device plugin
+examples/input-semantical-plugin/
+                                direct semantical light-mix E2E plugin
 examples/telemetry-plugin/      real safe application-boundary plugin
 examples/telemetry-fallback-plugin/
                                 manual loader fallback E2E probe
@@ -310,6 +325,7 @@ third-party/scs_sdk_history/    official SDK 1.0–1.14 history and notices
 | [`scs-sdk-plugin`](crates/scs-sdk-plugin/) | Writing a safe plugin and understanding lifecycle guarantees. |
 | [Telemetry example](examples/telemetry-plugin/) | Seeing explicit subscriptions, typed callbacks, build artifacts, and real ETS2 validation. |
 | [Input example](examples/input-plugin/) | Seeing explicit device registration and frame-scoped bool/float event generation. |
+| [Semantical input example](examples/input-semantical-plugin/) | Proving direct `semantical.light?0` routing without controller binding. |
 | [`scs-sdk`](crates/scs-sdk/) | Typed descriptors, values, indices, versions, schema history, and decoding. |
 | [`scs-sdk-sys`](crates/scs-sdk-sys/) | Auditing the raw ABI and official header mapping. |
 | [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | Reviewing the exported-entry-point contract and independent consumer fixtures. |

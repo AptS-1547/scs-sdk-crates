@@ -97,7 +97,9 @@ scs_telemetry_shutdown
 
 接下来可以阅读 [safe plugin framework 指南](crates/scs-sdk-plugin/)、
 [真实 telemetry example](examples/telemetry-plugin/)或
-[input-device example](examples/input-plugin/)。
+[generic input-device example](examples/input-plugin/)。独立的
+[semantical input fixture](examples/input-semantical-plugin/README.zh.md) 会展示无需 binding
+UI 的直接 game-mix routing。
 
 ## 先看证据，再看承诺
 
@@ -141,8 +143,8 @@ scs-sdk                 no_std value、descriptor、catalog、decoding
         ▼
 scs-sdk-sys             no_std x86-64 C ABI definitions
 
-examples/input-plugin 通过独立 InputPlugin runtime 使用相同分层。
-scs-sdk-plugin-macros 为每个选定 API 生成对应的两个 export。
+examples/input-plugin 与 examples/input-semantical-plugin 通过独立 InputPlugin runtime
+使用相同分层。scs-sdk-plugin-macros 为每个选定 API 生成对应的两个 export。
 ```
 
 | 层 | 负责 | 不负责 |
@@ -153,6 +155,7 @@ scs-sdk-plugin-macros 为每个选定 API 生成对应的两个 export。
 | [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/) | 把安全构造表达式展开成 telemetry 和/或 input loader export。 | Runtime policy 或产品行为。 |
 | [`examples/telemetry-plugin`](examples/telemetry-plugin/) | 真实的安全插件与端到端边界 fixture。 | 产品功能。 |
 | [`examples/input-plugin`](examples/input-plugin/) | 使用 typed bool/float event 的安全 generic input device。 | 硬件集成或产品功能。 |
+| [`examples/input-semantical-plugin`](examples/input-semantical-plugin/) | 直接驱动官方 `light` bool mix 的独立安全 semantical device。 | Generic binding 或产品功能。 |
 
 Cargo 依赖方向保持为：
 
@@ -207,6 +210,11 @@ Input 是独立 API surface，不会被硬塞进 `TelemetryPlugin`：
 以及部分初始化失败后保留的 stale context。安全示例与隔离宏 fixture 的应用源码均不含
 `unsafe`。
 
+独立 semantical fixture 遵循官方 SDK sample 的 `light` bool input。新的 controls 文件
+会引用 `semantical.light?0`，所以游戏不需要用户 binding 就能激活并消费该 device。
+确定性的 false/true cycle 会为第二种 device class 提供直接真实游戏证据，同时不把该
+行为混进 Generic artifact。
+
 ## 所有契约都保持显式
 
 - **订阅由插件声明，而不是 framework 猜测。** 实现 callback 不会触发注册，
@@ -257,10 +265,13 @@ ownership model 通过 Miri strict provenance 验证。
 | --- | --- | --- | --- |
 | Windows | x86-64 GNU | `scripts/build-windows-plugin.sh` | `scs_sdk_telemetry_example.dll` |
 | Windows Input | x86-64 GNU | `scripts/build-windows-input-plugin.sh` | `scs_sdk_input_example.dll` |
+| Windows Semantical Input | x86-64 GNU | `scripts/build-windows-input-semantical-plugin.sh` | `scs_sdk_input_semantical_example.dll` |
 | Linux | x86-64，通过 Zig 保持 glibc 2.17 下限 | `scripts/build-linux-plugin.sh` | `libscs_sdk_telemetry_example.so` |
 | Linux Input | x86-64，通过 Zig 保持 glibc 2.17 下限 | `scripts/build-linux-input-plugin.sh` | `libscs_sdk_input_example.so` |
+| Linux Semantical Input | x86-64，通过 Zig 保持 glibc 2.17 下限 | `scripts/build-linux-input-semantical-plugin.sh` | `libscs_sdk_input_semantical_example.so` |
 | macOS | x86-64；Apple Silicon 上通过 Rosetta | `scripts/build-macos-plugin.sh` | `libscs_sdk_telemetry_example.dylib` |
 | macOS Input | x86-64；Apple Silicon 上通过 Rosetta | `scripts/build-macos-input-plugin.sh` | `libscs_sdk_input_example.dylib` |
+| macOS Semantical Input | x86-64；Apple Silicon 上通过 Rosetta | `scripts/build-macos-input-semantical-plugin.sh` | `libscs_sdk_input_semantical_example.dylib` |
 
 验证内容包括原生文件格式、x86-64 架构以及精确的 dynamic export 集合。macOS
 build 还会为本地加载应用并验证 ad-hoc signature；这不等于 Developer ID signing
@@ -277,6 +288,8 @@ crates/scs-sdk/                 safe no_std typed wrapper 与 catalog
 crates/scs-sdk-plugin/          safe lifecycle/runtime/framework
 crates/scs-sdk-plugin-macros/   exported-entry-point proc macro
 examples/input-plugin/          安全的 generic input-device plugin
+examples/input-semantical-plugin/
+                                直接驱动 semantical light mix 的 E2E plugin
 examples/telemetry-plugin/      真实的 safe application-boundary plugin
 examples/telemetry-fallback-plugin/
                                 手动 loader fallback E2E probe
@@ -290,6 +303,7 @@ third-party/scs_sdk_history/    官方 SDK 1.0–1.14 历史与声明
 | [`scs-sdk-plugin`](crates/scs-sdk-plugin/README.zh.md) | 编写安全插件并理解 lifecycle guarantee。 |
 | [Telemetry example](examples/telemetry-plugin/README.zh.md) | 查看显式订阅、typed callback、build artifact 与真实 ETS2 验证。 |
 | [Input example](examples/input-plugin/README.zh.md) | 查看显式 device registration 与 frame-scoped bool/float event generation。 |
+| [Semantical input example](examples/input-semantical-plugin/README.zh.md) | 证明无需 controller binding 的 `semantical.light?0` 直接 routing。 |
 | [`scs-sdk`](crates/scs-sdk/README.zh.md) | Typed descriptor、value、index、version、schema history 与 decoding。 |
 | [`scs-sdk-sys`](crates/scs-sdk-sys/README.zh.md) | 审计 raw ABI 与官方 header mapping。 |
 | [`scs-sdk-plugin-macros`](crates/scs-sdk-plugin-macros/README.zh.md) | 检查 exported-entry-point contract 与独立 consumer fixture。 |
