@@ -15,6 +15,9 @@ signatures, calling conventions, and NUL-terminated byte constants.
 > This crate covers the public **telemetry** interface from SDK 1.14. The SDK's
 > input-device API is not implemented by this workspace yet.
 
+This is an independent community crate and is not affiliated with or endorsed
+by SCS Software.
+
 ## Design constraints
 
 - **Pure Rust:** no C or C++ shim, CMake, generated bindings, bindgen, or Clang
@@ -109,11 +112,12 @@ scripts.
 ## License
 
 Workspace-authored Rust code is available under either
-[Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your
-option.
+[Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
-The official files under
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/) remain third-party
-SCS Software material governed by the separate license shipped with that SDK.
-Their presence in this repository does not relicense them under the workspace
-license.
+ABI declarations, constants, identifiers, catalogs, schema-history metadata,
+and related documentation derived from SDK 1.0 through 1.14 retain both
+original SCS Software notices: [LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)
+for SDK 1.0-1.5 and [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK
+1.6-1.14. The
+[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+remains third-party material and is not relicensed under the workspace license.

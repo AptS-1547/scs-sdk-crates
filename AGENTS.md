@@ -242,6 +242,16 @@ For changes to SDK coverage:
 - The official SCS SDK distribution remains third-party material under its own
   license. Do not imply that files under third-party/scs_sdk_1_14/ were
   relicensed under the workspace license.
+- Preserve both historical SCS notices: SDK 1.0 through 1.5 use the 2013
+  copyright notice, while SDK 1.6 through 1.14 use the 2016 notice. Keep the
+  root and every public crate's LICENSE-SCS-SDK-2013 and
+  LICENSE-SCS-SDK-2016 byte-identical to the tracked texts under
+  third-party/scs_sdk_history/licenses/. Public package READMEs must
+  distinguish workspace-authored code from SCS-derived ABI declarations,
+  constants, identifiers, schema-history metadata, and documentation.
+- Keep the English and Chinese third-party notices synchronized. Describe this
+  repository as an independent community project and never imply affiliation
+  with or endorsement by SCS Software.
 - Preserve upstream license and attribution files when updating vendored SDK
   material or incorporating code from another project.
 - Check license compatibility before adding a dependency or copying an

@@ -14,6 +14,8 @@
 > 本 crate 覆盖 SDK 1.14 的公共 **telemetry** 接口。SDK 中的 input-device API
 > 目前尚未由本 workspace 实现。
 
+本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
+
 ## 设计约束
 
 - **纯 Rust：** 编译不需要 C/C++ shim、CMake、生成式 binding、bindgen 或 Clang。
@@ -97,6 +99,9 @@ cargo +nightly-2026-04-12 miri test --locked -p scs-sdk
 Workspace 自有 Rust 代码可由你选择使用
 [Apache License 2.0](LICENSE-APACHE) 或 [MIT](LICENSE-MIT)。
 
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/) 中的官方文件仍是
-SCS Software 的第三方材料，受 SDK 随附的独立许可约束。将它们保留在本仓库内不代表
-这些材料被重新许可为 workspace license。
+来源于 SDK 1.0 到 1.14 的 ABI 声明、常量、标识符、catalog、schema-history
+元数据与相关文档保留两份原始 SCS Software 声明：SDK 1.0-1.5 见
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.14 见
+[LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016)。
+[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+仍是第三方材料，不会被重新许可为 workspace license。

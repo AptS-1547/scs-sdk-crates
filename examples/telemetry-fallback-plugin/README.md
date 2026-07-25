@@ -250,5 +250,10 @@ API-1.00 callback paths.
 
 ## License
 
-Workspace-authored Rust code is licensed under **MIT OR Apache-2.0**. The
-official SCS SDK files under `third-party/` remain subject to SCS's own license.
+Workspace-authored Rust code is licensed under **MIT OR Apache-2.0**. SCS SDK
+1.0-1.5 attribution is preserved in
+[`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013), and SDK 1.6-1.14
+attribution is preserved in
+[`LICENSE-SCS-SDK-2016`](../../LICENSE-SCS-SDK-2016). See the repository's
+[Third-Party Notices](../../THIRD_PARTY_NOTICES.md). This is an independent
+community example and is not affiliated with or endorsed by SCS Software.

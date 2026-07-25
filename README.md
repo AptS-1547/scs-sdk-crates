@@ -6,6 +6,10 @@ Typed Rust bindings and a safe plugin framework for the SCS Software SDK. The cu
 
 The current foundation is implemented entirely in Rust and requires no C++ shim, CMake, or bindgen. The original official SDK distribution remains in `third-party/scs_sdk_1_14/` as the authoritative source for the ABI and constants.
 
+This is an independent community project and is not affiliated with or
+endorsed by SCS Software. Product and company names are used only to identify
+compatible games and interfaces. See [Third-Party Notices](THIRD_PARTY_NOTICES.md).
+
 ## Foundation goals
 
 The current design maintains the following boundaries:
@@ -376,6 +380,10 @@ examples/telemetry-fallback-plugin/
                                 manual real-ETS API fallback E2E cdylib
 scripts/                        Windows/Linux/macOS builds and artifact verification
 third-party/scs_sdk_1_14/       original official SDK distribution and license
+third-party/scs_sdk_history/    SDK 1.0-1.14 archive provenance and two notices
+LICENSE-SCS-SDK-2013            SDK 1.0-1.5 copyright and permission notice
+LICENSE-SCS-SDK-2016            SDK 1.6-1.14 copyright and permission notice
+THIRD_PARTY_NOTICES.md          attribution and project-independence notice
 tmp/                            local investigations, log conclusions, and design notes
 ```
 
@@ -449,7 +457,7 @@ MIRIFLAGS=-Zmiri-strict-provenance \
 
 Test coverage includes:
 
-- byte-identical Apache-2.0 and MIT license copies in every publishable crate;
+- byte-identical Apache-2.0, MIT, SDK 1.0-1.5, and SDK 1.6-1.14 license copies in every public crate;
 - every SDK result code and channel flag;
 - item-by-item raw-name, order, indexing-mode, and duplicate checks across the 107/60/15 catalogs;
 - every primitive and geometry tagged-union decoder;
@@ -700,4 +708,16 @@ Rust code authored for this project is licensed, at your option, under either of
 - [Apache License, Version 2.0](LICENSE-APACHE);
 - [MIT License](LICENSE-MIT).
 
-`third-party/scs_sdk_1_14/` originates from SCS Software and is governed by the separate license text distributed with the SDK. That license permits use, modification, and distribution while requiring copies or substantial portions of the software to retain the SCS Software copyright and license notice.
+The official SDK files and SCS-derived ABI declarations, constants,
+identifiers, catalogs, and related documentation retain the SCS Software
+copyright and permission notices reproduced in
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013) and
+[LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016). The historical archive inventory
+and license mapping are recorded under
+[`third-party/scs_sdk_history/`](third-party/scs_sdk_history/), while the current
+distribution remains under
+[`third-party/scs_sdk_1_14/`](third-party/scs_sdk_1_14/) and is not relicensed
+under the workspace license.
+
+See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for the complete attribution
+and independence statement.

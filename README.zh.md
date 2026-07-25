@@ -6,6 +6,9 @@ SCS Software SDK 的类型化 Rust bindings 与 safe plugin framework。当前 w
 
 当前基座使用纯 Rust 实现，不需要 C++ shim、CMake 或 bindgen。官方 SDK 原始分发仍保留在 `third-party/scs_sdk_1_14/`，它是 ABI 与常量的权威来源。
 
+本项目是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。产品及公司名称
+仅用于标识兼容的游戏与接口。详见[第三方声明](THIRD_PARTY_NOTICES.zh.md)。
+
 ## 基座目标
 
 当前设计坚持以下边界：
@@ -361,6 +364,10 @@ examples/telemetry-fallback-plugin/
                                 真实 ETS API fallback 手动 E2E cdylib
 scripts/                        Windows/Linux/macOS 构建与产物验证
 third-party/scs_sdk_1_14/       官方 SDK 原始分发与许可证
+third-party/scs_sdk_history/    SDK 1.0-1.14 压缩包来源与两份原始声明
+LICENSE-SCS-SDK-2013            SDK 1.0-1.5 版权与许可声明
+LICENSE-SCS-SDK-2016            SDK 1.6-1.14 版权与许可声明
+THIRD_PARTY_NOTICES.zh.md       归属与项目独立性声明
 tmp/                            本地调查、日志结论和设计笔记
 ```
 
@@ -434,7 +441,7 @@ MIRIFLAGS=-Zmiri-strict-provenance \
 
 测试覆盖包括：
 
-- 每个可发布 crate 内与仓库根目录逐字节一致的 Apache-2.0 与 MIT 许可证副本；
+- 每个公共 crate 内逐字节一致的 Apache-2.0、MIT、SDK 1.0-1.5 与 SDK 1.6-1.14 许可证副本；
 - 所有 SDK result code 与 channel flag；
 - 107/60/15 catalog 的逐项 raw 名称比对、顺序、索引模式和重复项；
 - 每种 primitive/geometry tagged-union 解码；
@@ -685,4 +692,12 @@ macOS 游戏日志通常位于：
 - [Apache License, Version 2.0](LICENSE-APACHE)；
 - [MIT License](LICENSE-MIT)。
 
-`third-party/scs_sdk_1_14/` 来自 SCS Software，受其随 SDK 提供的独立授权文本约束。该文本允许使用、修改和分发，但要求在软件副本或实质性部分中保留 SCS Software 的版权与许可声明。
+官方 SDK 文件以及来源于 SCS SDK 的 ABI 声明、常量、标识符、catalog 和相关文档
+保留 SCS Software 的版权与许可声明，完整文本见
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013) 与
+[LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016)。历史压缩包清单与许可证映射记录在
+[`third-party/scs_sdk_history/`](third-party/scs_sdk_history/) 中，当前原始分发仍保存在
+[`third-party/scs_sdk_1_14/`](third-party/scs_sdk_1_14/) 中，不会被重新许可为
+workspace license。
+
+完整归属与项目独立性说明见[第三方声明](THIRD_PARTY_NOTICES.zh.md)。

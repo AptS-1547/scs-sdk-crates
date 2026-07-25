@@ -20,6 +20,9 @@ A product plugin normally needs only `scs-sdk-plugin` in its manifest.
 > The framework covers the public **SCS Telemetry SDK 1.14** interface. The
 > SDK's input-device API is not implemented by this workspace yet.
 
+This is an independent community crate and is not affiliated with or endorsed
+by SCS Software.
+
 ## Application contract
 
 Applications implement `TelemetryPlugin` with four explicit concerns:
@@ -212,6 +215,10 @@ verification scripts.
 Workspace-authored Rust code is available under either
 [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
-The official SDK files under
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/) remain SCS
-Software material governed by their separately distributed license.
+SCS-facing lifecycle contracts, ABI identifiers, compatibility metadata, and
+related documentation derived from SDK 1.0 through 1.14 retain both original
+SCS Software notices: [LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013) for SDK
+1.0-1.5 and [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK 1.6-1.14.
+The
+[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+remains third-party material and is not relicensed under the workspace license.

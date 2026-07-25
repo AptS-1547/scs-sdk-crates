@@ -14,6 +14,9 @@ Most applications should use the re-export from
 [`scs-sdk-plugin`](../scs-sdk-plugin/) rather than depending on this proc-macro
 crate directly.
 
+This is an independent community crate and is not affiliated with or endorsed
+by SCS Software.
+
 ## Expansion contract
 
 `export_plugin!` parses its input as exactly one ordinary Rust expression. The
@@ -138,6 +141,9 @@ Each build script verifies the finished platform artifact and both SCS exports.
 Workspace-authored Rust code is available under either
 [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
-The official SDK files under
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/) remain SCS
-Software material governed by their separately distributed license.
+SCS loader symbol names, ABI contracts, and related documentation derived from
+SDK 1.0 through 1.14 retain both original SCS Software notices:
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013) for SDK 1.0-1.5 and
+[LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK 1.6-1.14. The
+[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+remains third-party material and is not relicensed under the workspace license.

@@ -10,6 +10,8 @@
 > 本 crate 覆盖 SDK 1.14 的公共 **telemetry** 接口。SDK 中的 input-device API
 > 目前尚未由本 workspace 实现。
 
+本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
+
 ## 分层职责
 
 本层负责：
@@ -158,5 +160,9 @@ scripts/check-plugin-boundary.sh
 Workspace 自有 Rust 代码可由你选择使用
 [Apache License 2.0](LICENSE-APACHE) 或 [MIT](LICENSE-MIT)。
 
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/) 中的官方 SDK 文件仍是
-SCS Software 材料，受其独立分发的许可证约束。
+来源于 SDK 1.0 到 1.14 的 typed descriptor、常量、标识符、catalog、
+schema-history 元数据与相关文档保留两份原始 SCS Software 声明：SDK 1.0-1.5 见
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.14 见
+[LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016)。
+[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+仍是第三方材料，不会被重新许可为 workspace license。

@@ -281,5 +281,8 @@ scripts/check-plugin-macro-fixtures.sh
 
 ## 许可证
 
-workspace 自编 Rust 代码使用 **MIT OR Apache-2.0**。`third-party/` 下的官方
-SCS SDK 文件仍然受 SCS 自己的许可证约束。
+workspace 自编 Rust 代码使用 **MIT OR Apache-2.0**。SCS SDK 1.0-1.5 的归属
+声明保存在 [`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013)，SDK 1.6-1.14
+的归属声明保存在 [`LICENSE-SCS-SDK-2016`](../../LICENSE-SCS-SDK-2016)。完整说明见
+仓库[第三方声明](../../THIRD_PARTY_NOTICES.zh.md)。本示例是独立社区项目，与
+SCS Software 不存在隶属或官方背书关系。
