@@ -2,7 +2,7 @@
 
 **中文** | [English](README.md)
 
-`scs-sdk` 是建立在 [`scs-sdk-sys`](../scs-sdk-sys/) 之上的安全、typed、
+`scs-sdk` 是建立在 [`scs-sdk-sys`](https://crates.io/crates/scs-sdk-sys) 之上的安全、typed、
 `no_std` **SCS SDK 1.14** 公开 telemetry 与 input 接口解释层。它把 header 形状的 ABI
 转换为 typed Rust value、descriptor、catalog、版本域和 callback scope 内的 SDK
 操作，但不接管插件生命周期或产品状态。
@@ -26,7 +26,7 @@
 
 它刻意**不负责** loader export、进程级 runtime 状态、callback context 分配、注册事务、
 panic containment 或产品 telemetry 状态。这些机制属于
-[`scs-sdk-plugin`](../scs-sdk-plugin/) 或应用层。
+[`scs-sdk-plugin`](https://crates.io/crates/scs-sdk-plugin) 或应用层。
 
 本 crate 保持 `no_std`，不会仅为了 owned string 或 collection 的便利而引入
 `std` 或 `alloc`。foreign 数据需要活过直接 callback scope 时，应由更高层完成复制。

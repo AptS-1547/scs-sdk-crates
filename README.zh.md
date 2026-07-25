@@ -280,6 +280,61 @@ build 还会为本地加载应用并验证 ad-hoc signature；这不等于 Devel
 安装路径、live log 检查与预期 runtime marker 见
 [example 的平台和 ETS2 验证指南](examples/telemetry-plugin/README.zh.md#构建与验证)。
 
+## Release 与 crates.io 发布
+
+推送与 workspace version 完全一致的 tag（例如 `v0.1.0`）会启动
+[Release workflow](.github/workflows/release.yml)。tag 指向的提交必须已经包含在
+`origin/master` 中；指向未合并提交的 tag 会在任何发布动作开始前被拒绝。
+
+Workflow 会先运行完整的质量、package、Miri 与平台 gate，然后按依赖顺序发布四个
+crate：
+
+```text
+scs-sdk-sys -> scs-sdk
+scs-sdk-plugin-macros -> scs-sdk-plugin
+scs-sdk + scs-sdk-sys + scs-sdk-plugin-macros -> scs-sdk-plugin
+```
+
+`publish-crates` job 使用 GitHub environment `crates-io`，并要求其中存在
+`CARGO_REGISTRY_TOKEN` secret。crates.io 已经可见的精确 crate version 会被跳过，
+因此失败的 workflow 可以续跑，而不会尝试重复发布。新发布的底层依赖会通过 Cargo
+registry index 进行有界轮询，确认可见后才发布依赖它的上层 crate。
+
+四个 crate 全部可见后，workflow 才会创建 draft GitHub Release、上传全部资产、比较
+远端资产清单与预期清单，最后把 draft 转为正式 Release。稳定 tag 会成为 latest；
+`v0.2.0-rc.1` 之类的 semantic prerelease tag 会保持 prerelease 状态。
+
+每个 Release 包含三个平台归档：
+
+```text
+scs-sdk-crates-v0.1.0-windows-x86_64.zip
+scs-sdk-crates-v0.1.0-linux-x86_64-glibc-2.17.tar.gz
+scs-sdk-crates-v0.1.0-macos-x86_64.tar.gz
+```
+
+每个归档都包含经过验证的 Telemetry、Generic Input 与 Semantical Input example 动态库，
+以及中英文 README、workspace license、保留的 SCS SDK 声明和第三方声明。两个 Input
+example 是互斥安装 fixture，同一时间最多安装其中一个；Telemetry example 可以与选定
+的 Input example 共存。
+
+Release 归档由 `checksums.txt` 覆盖，并通过 GitHub Actions keyless OIDC 使用 Sigstore
+cosign 签名。验证时应使用精确 tag 与 workflow identity：
+
+```bash
+TAG=v0.1.0
+
+cosign verify-blob checksums.txt \
+  --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity \
+    "https://github.com/AptS-1547/scs-sdk-crates/.github/workflows/release.yml@refs/tags/$TAG"
+
+sha256sum -c checksums.txt
+```
+
+macOS 可用 `shasum -a 256 -c checksums.txt` 完成最后的哈希校验。
+
 ## 仓库地图
 
 ```text

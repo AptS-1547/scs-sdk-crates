@@ -12,7 +12,7 @@ scs_sdk_plugin::export_input_plugin!(InputPlugin::default());
 ```
 
 Most applications should use the re-export from
-[`scs-sdk-plugin`](../scs-sdk-plugin/) rather than depending on this proc-macro
+[`scs-sdk-plugin`](https://crates.io/crates/scs-sdk-plugin) rather than depending on this proc-macro
 crate directly.
 
 This is an independent community crate and is not affiliated with or endorsed
@@ -100,7 +100,7 @@ consumer even when their application source is unchanged.
 
 An ignored proc-macro doctest is not considered sufficient proof. The repository
 keeps an isolated consumer workspace under
-[`../scs-sdk-plugin/tests/fixtures/export-plugin`](../scs-sdk-plugin/tests/fixtures/export-plugin/):
+[`crates/scs-sdk-plugin/tests/fixtures/export-plugin`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/crates/scs-sdk-plugin/tests/fixtures/export-plugin):
 
 - the Telemetry pass fixture implements `TelemetryPlugin` in safe source and
   expands `export_plugin!(Plugin::default())` as a real `cdylib`;

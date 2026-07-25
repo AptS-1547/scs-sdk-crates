@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Raw x86-64 ABI bindings for the SCS Software Telemetry and Input SDKs"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/scs-sdk-sys"
+readme = "README.md"
+exclude = ["AGENTS.md"]
 
 [lib]
 path = "src/lib.rs"

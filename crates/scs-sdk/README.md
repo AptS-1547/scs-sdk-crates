@@ -3,7 +3,7 @@
 [中文](README.zh.md) | **English**
 
 `scs-sdk` is the safe, typed, `no_std` interpretation of
-[`scs-sdk-sys`](../scs-sdk-sys/) for the public telemetry and input interfaces in SCS SDK 1.14
+[`scs-sdk-sys`](https://crates.io/crates/scs-sdk-sys) for the public telemetry and input interfaces in SCS SDK 1.14
 interface. It turns the header-shaped ABI into typed Rust values, descriptors,
 catalogs, version domains, and callback-scoped SDK operations without taking
 ownership of plugin lifecycle or product state.
@@ -29,7 +29,7 @@ This layer owns:
 It deliberately does **not** own exported loader symbols, process-global
 runtime state, callback-context allocation, registration transactions, panic
 containment, or a product's telemetry state. Those mechanisms belong in
-[`scs-sdk-plugin`](../scs-sdk-plugin/) or the application.
+[`scs-sdk-plugin`](https://crates.io/crates/scs-sdk-plugin) or the application.
 
 The crate remains `no_std` and does not add `std` or `alloc` merely for owned
 strings or collections. A higher layer copies foreign data when it must outlive

@@ -3,7 +3,7 @@
 **中文** | [English](README.md)
 
 `scs-sdk-plugin` 是 native SCS telemetry 与 input-device 插件的安全应用 framework 与 audited
-runtime 边界。它把 typed [`scs-sdk`](../scs-sdk/) 与生命周期管理、事务式注册、
+runtime 边界。它把 typed [`scs-sdk`](https://crates.io/crates/scs-sdk) 与生命周期管理、事务式注册、
 callback dispatch、panic containment 和稳定 foreign context ownership 组合起来，
 让普通插件源码保持 safe Rust。
 
@@ -181,8 +181,9 @@ protocol、save-game 解析、持久化或其他产品功能。产品仓库应�
 内容，而不是把它们塞进 framework。
 
 真实应用边界 fixture 见
-[`examples/telemetry-plugin`](../../examples/telemetry-plugin/)，独立 consumer macro
-fixture 位于 [`tests/fixtures/export-plugin`](tests/fixtures/export-plugin/)。
+[`examples/telemetry-plugin`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/examples/telemetry-plugin)，独立 consumer macro
+fixture 位于
+[`tests/fixtures/export-plugin`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/crates/scs-sdk-plugin/tests/fixtures/export-plugin)。
 
 ## 验证
 

@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - '.cargo/**'
+      - '.github/workflows/release.yml'
       - '.github/workflows/rust.yml'
       - 'examples/input-plugin/**'
       - 'examples/input-semantical-plugin/**'
@@ -29,6 +30,7 @@ on:
     branches: [master]
     paths:
       - '.cargo/**'
+      - '.github/workflows/release.yml'
       - '.github/workflows/rust.yml'
       - 'examples/input-plugin/**'
       - 'examples/input-semantical-plugin/**'

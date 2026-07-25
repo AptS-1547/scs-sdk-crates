@@ -10,7 +10,7 @@ scs_sdk_plugin::export_plugin!(Plugin::default());
 scs_sdk_plugin::export_input_plugin!(InputPlugin::default());
 ```
 
-大多数应用应通过 [`scs-sdk-plugin`](../scs-sdk-plugin/) 的 re-export 使用它，而不是
+大多数应用应通过 [`scs-sdk-plugin`](https://crates.io/crates/scs-sdk-plugin) 的 re-export 使用它，而不是
 直接依赖此 proc-macro crate。
 
 本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
@@ -86,7 +86,7 @@ retirement，不解释 SDK value，也不实现产品行为。它们生成固定
 ## 独立 consumer fixture
 
 Ignored proc-macro doctest 不足以作为证明。仓库在
-[`../scs-sdk-plugin/tests/fixtures/export-plugin`](../scs-sdk-plugin/tests/fixtures/export-plugin/)
+[`crates/scs-sdk-plugin/tests/fixtures/export-plugin`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/crates/scs-sdk-plugin/tests/fixtures/export-plugin)
 维护独立 consumer workspace：
 
 - Telemetry pass fixture 在 safe source 中实现 `TelemetryPlugin`，并把

@@ -8,7 +8,7 @@ mirrors the C declarations used by Euro Truck Simulator 2 and American Truck
 Simulator without adding wrapper policy, plugin lifecycle, or product logic.
 
 The authoritative source is the official header distribution preserved under
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/). Rust definitions
+[`third-party/scs_sdk_1_14/`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/third-party/scs_sdk_1_14). Rust definitions
 are reviewed against those files for layout, numeric values, function
 signatures, calling conventions, and NUL-terminated byte constants.
 
@@ -81,13 +81,13 @@ Some raw declarations are intentionally awkward:
 
 These choices preserve the actual ABI instead of inventing validity guarantees.
 Tag checking, lifetime-bound borrowing, typed value decoding, and ergonomic
-errors belong in [`scs-sdk`](../scs-sdk/).
+errors belong in [`scs-sdk`](https://crates.io/crates/scs-sdk).
 
 ## Intended users
 
 This crate is primarily for authors auditing or extending the typed wrapper and
 runtime. Ordinary plugin crates should depend on
-[`scs-sdk-plugin`](../scs-sdk-plugin/) and use its `sdk` re-export. Application
+[`scs-sdk-plugin`](https://crates.io/crates/scs-sdk-plugin) and use its `sdk` re-export. Application
 plugins should not read unions, handle raw pointers, import raw SCS types, or
 declare loader entry points themselves.
 

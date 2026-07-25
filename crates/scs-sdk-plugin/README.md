@@ -4,7 +4,7 @@
 
 `scs-sdk-plugin` is the safe application framework and audited runtime boundary
 for native SCS telemetry and input-device plugins. It combines the typed
-[`scs-sdk`](../scs-sdk/) layer with lifecycle management, transactional
+[`scs-sdk`](https://crates.io/crates/scs-sdk) layer with lifecycle management, transactional
 registration, callback dispatch, panic containment, and stable foreign context
 ownership so ordinary plugin source can remain safe Rust.
 
@@ -199,9 +199,9 @@ other product features. A product repository should build those concerns on
 top of the safe hooks rather than moving them into the framework.
 
 See the real application-boundary fixture at
-[`examples/telemetry-plugin`](../../examples/telemetry-plugin/) and the isolated
+[`examples/telemetry-plugin`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/examples/telemetry-plugin) and the isolated
 consumer macro fixture under
-[`tests/fixtures/export-plugin`](tests/fixtures/export-plugin/).
+[`tests/fixtures/export-plugin`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/crates/scs-sdk-plugin/tests/fixtures/export-plugin).
 
 ## Validation
 

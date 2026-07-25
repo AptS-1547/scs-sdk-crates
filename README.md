@@ -300,7 +300,67 @@ export set. macOS builds additionally receive and verify an ad-hoc signature
 for local loading; this is not Developer ID signing or notarization.
 
 For installation paths, live log checks, and expected runtime markers, use the
-[example's platform and ETS2 validation guide](examples/telemetry-plugin/#build-and-verify).
+[example's platform and ETS2 validation guide](examples/telemetry-plugin/README.md#build-and-verify).
+
+## Releases and crates.io publication
+
+Pushing a tag that exactly matches the workspace version, such as `v0.1.0`,
+starts [the release workflow](.github/workflows/release.yml). The tagged commit
+must be contained in `origin/master`; tags pointing at an unmerged commit are
+rejected before any publication starts.
+
+The workflow runs the complete quality, package, Miri, and platform gates, then
+publishes the four crates in dependency order:
+
+```text
+scs-sdk-sys -> scs-sdk
+scs-sdk-plugin-macros -> scs-sdk-plugin
+scs-sdk + scs-sdk-sys + scs-sdk-plugin-macros -> scs-sdk-plugin
+```
+
+The `publish-crates` job uses the GitHub environment `crates-io` and expects its
+`CARGO_REGISTRY_TOKEN` secret. Exact crate versions already visible
+on crates.io are skipped, so a failed workflow can resume without attempting a
+duplicate publication. Newly published dependencies are polled through Cargo's
+registry index before their dependents are published.
+
+Only after every crate is visible does the workflow prepare a draft GitHub
+Release, upload all assets, compare the remote asset list with the expected
+list, and publish the draft. Stable tags become the latest release; semantic
+prerelease tags such as `v0.2.0-rc.1` remain prereleases.
+
+Each release contains three platform archives:
+
+```text
+scs-sdk-crates-v0.1.0-windows-x86_64.zip
+scs-sdk-crates-v0.1.0-linux-x86_64-glibc-2.17.tar.gz
+scs-sdk-crates-v0.1.0-macos-x86_64.tar.gz
+```
+
+Every archive contains the verified Telemetry, Generic Input, and Semantical
+Input example libraries plus the English/Chinese READMEs, workspace licenses,
+preserved SCS SDK notices, and third-party notices. The two Input examples are
+mutually exclusive installation fixtures: install at most one of them at a
+time. The Telemetry example may coexist with the selected Input example.
+
+Release archives are covered by `checksums.txt`, which is signed through GitHub
+Actions keyless OIDC with Sigstore cosign. Verify a release with the exact tag
+and workflow identity:
+
+```bash
+TAG=v0.1.0
+
+cosign verify-blob checksums.txt \
+  --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity \
+    "https://github.com/AptS-1547/scs-sdk-crates/.github/workflows/release.yml@refs/tags/$TAG"
+
+sha256sum -c checksums.txt
+```
+
+On macOS, use `shasum -a 256 -c checksums.txt` for the final hash check.
 
 ## Repository map
 

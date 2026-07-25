@@ -8,7 +8,7 @@
 或产品逻辑。
 
 权威来源是仓库内保留的官方 header 分发：
-[`third-party/scs_sdk_1_14/`](../../third-party/scs_sdk_1_14/)。Rust 定义会逐项
+[`third-party/scs_sdk_1_14/`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/third-party/scs_sdk_1_14)。Rust 定义会逐项
 对照这些文件审计布局、数值、函数签名、调用约定与以 NUL 结尾的字节常量。
 
 > 本 crate 覆盖 SDK 1.14 中的公开 Telemetry API 1.00/1.01 与 Input API 1.00。
@@ -68,12 +68,12 @@ association catalog；本 crate 不根据产品行为推导这些策略。
 - 可选函数指针与 opaque callback context 保留 foreign pointer 表示。
 
 这些选择是在保持真实 ABI，而不是凭空制造有效性保证。tag 校验、受生命周期约束的
-借用、typed value 解码与易用错误类型属于 [`scs-sdk`](../scs-sdk/)。
+借用、typed value 解码与易用错误类型属于 [`scs-sdk`](https://crates.io/crates/scs-sdk)。
 
 ## 适用对象
 
 此 crate 主要供审计或扩展 typed wrapper 和 runtime 的开发者使用。普通插件 crate
-应依赖 [`scs-sdk-plugin`](../scs-sdk-plugin/)，并使用它的 `sdk` re-export。
+应依赖 [`scs-sdk-plugin`](https://crates.io/crates/scs-sdk-plugin)，并使用它的 `sdk` re-export。
 应用插件不应自行读取 union、处理原始指针、导入 raw SCS 类型或声明 loader 入口。
 
 ## 验证

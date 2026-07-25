@@ -1,0 +1,384 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Publishing crates and releases is intentionally non-cancellable. A newer
+  # tag must not interrupt an irreversible publication already in progress.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  validate:
+    name: Validate release source and packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-validation-v1
+
+      - name: Validate tag, version, and release branch
+        shell: bash
+        run: |
+          scripts/check-release-version.sh "$GITHUB_REF_NAME"
+
+          tag_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/master; then
+            echo "Release tag $GITHUB_REF_NAME is not contained in origin/master." >&2
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check shell syntax
+        run: bash -n scripts/*.sh
+
+      - name: Check published crate license copies
+        run: scripts/check-license-copies.sh
+
+      - name: Check safe application boundary
+        run: scripts/check-plugin-boundary.sh
+
+      - name: Check plugin macro compile fixtures
+        run: scripts/check-plugin-macro-fixtures.sh
+
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Check Rust documentation
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo doc --workspace --no-deps --locked
+
+      - name: Build and inspect publishable crate packages
+        run: scripts/check-crate-packages.sh
+
+  miri:
+    name: Release Miri (${{ matrix.package }})
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: scs-sdk
+            miri_flags: ''
+          - package: scs-sdk-plugin
+            miri_flags: -Zmiri-strict-provenance
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Miri toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-12
+          components: miri, rust-src
+
+      - name: Cache Miri build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-miri-${{ matrix.package }}-v1
+
+      - name: Run Miri
+        env:
+          MIRIFLAGS: ${{ matrix.miri_flags }}
+        run: cargo +nightly-2026-04-12 miri test --locked -p ${{ matrix.package }}
+
+  build-windows:
+    name: Build Windows x86-64 release archive
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install MinGW-w64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-mingw-w64-x86-64 \
+            gcc-mingw-w64-x86-64
+
+      - name: Cache Windows build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-windows-x86-64-v1
+
+      - name: Build, verify, and package examples
+        run: scripts/package-release-artifact.sh windows "$GITHUB_REF_NAME" dist
+
+      - name: Build and verify independent macro fixture
+        run: scripts/build-windows-plugin-macro-fixture.sh
+
+      - name: Upload Windows release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-x86-64
+          path: dist/scs-sdk-crates-${{ github.ref_name }}-windows-x86_64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux:
+    name: Build Linux x86-64 release archive
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Setup pinned Zig toolchain
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install pinned cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild@0.23.0
+
+      - name: Cache Linux build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux-x86-64-glibc-2.17-v1
+
+      - name: Build, verify, and package examples
+        run: scripts/package-release-artifact.sh linux "$GITHUB_REF_NAME" dist
+
+      - name: Build and verify independent macro fixture
+        run: scripts/build-linux-plugin-macro-fixture.sh
+
+      - name: Upload Linux release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-x86-64-glibc-2.17
+          path: dist/scs-sdk-crates-${{ github.ref_name }}-linux-x86_64-glibc-2.17.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS x86-64 release archive
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Cache macOS build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos-x86-64-v1
+
+      - name: Build, verify, and package examples
+        run: scripts/package-release-artifact.sh macos "$GITHUB_REF_NAME" dist
+
+      - name: Build and verify independent macro fixture
+        run: scripts/build-macos-plugin-macro-fixture.sh
+
+      - name: Upload macOS release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-x86-64
+          path: dist/scs-sdk-crates-${{ github.ref_name }}-macos-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-crates:
+    name: Publish crates.io packages
+    needs:
+      - miri
+      - build-windows
+      - build-linux
+      - build-macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: crates-io
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Publish missing crate versions in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: scripts/publish-crates.sh
+
+  github-release:
+    name: Sign and publish GitHub Release
+    needs: publish-crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download platform archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify platform archive set
+        run: scripts/verify-release-assets.sh release-assets "$GITHUB_REF_NAME" archives
+
+      - name: Install pinned cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v3.1.2
+
+      - name: Generate and sign checksums
+        shell: bash
+        run: |
+          (
+            cd release-assets
+            sha256sum \
+              "scs-sdk-crates-$GITHUB_REF_NAME-linux-x86_64-glibc-2.17.tar.gz" \
+              "scs-sdk-crates-$GITHUB_REF_NAME-macos-x86_64.tar.gz" \
+              "scs-sdk-crates-$GITHUB_REF_NAME-windows-x86_64.zip" \
+              > checksums.txt
+          )
+
+          cosign sign-blob --yes \
+            release-assets/checksums.txt \
+            --output-signature release-assets/checksums.txt.sig \
+            --output-certificate release-assets/checksums.txt.pem
+
+      - name: Verify generated signature and complete asset set
+        shell: bash
+        run: |
+          workflow_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$GITHUB_REF_NAME"
+          cosign verify-blob release-assets/checksums.txt \
+            --signature release-assets/checksums.txt.sig \
+            --certificate release-assets/checksums.txt.pem \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$workflow_identity"
+
+          scripts/verify-release-assets.sh release-assets "$GITHUB_REF_NAME" complete
+
+      - name: Generate release notes and body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq .body > generated-notes.md
+
+          scripts/generate-release-body.sh \
+            "$GITHUB_REF_NAME" generated-notes.md release-body.md
+
+      - name: Create or refresh draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          release_flags=(--draft --verify-tag)
+          if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+
+          api_output="$(mktemp)"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+            >"$api_output" 2>&1; then
+            if [[ "$(jq -r .draft "$api_output")" != "true" ]]; then
+              echo "Release $GITHUB_REF_NAME already exists and is not a draft." >&2
+              exit 1
+            fi
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "SCS SDK Rust Crates $GITHUB_REF_NAME" \
+              --notes-file release-body.md \
+              --draft
+          elif grep -Fq 'HTTP 404' "$api_output"; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "SCS SDK Rust Crates $GITHUB_REF_NAME" \
+              --notes-file release-body.md \
+              "${release_flags[@]}"
+          else
+            cat "$api_output" >&2
+            exit 1
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+
+      - name: Verify remote assets and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          expected_assets="$(mktemp)"
+          remote_assets="$(mktemp)"
+          find release-assets -maxdepth 1 -type f -exec basename {} \; \
+            | LC_ALL=C sort >"$expected_assets"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+            --jq '.assets[].name' | LC_ALL=C sort >"$remote_assets"
+          diff -u "$expected_assets" "$remote_assets"
+
+          publish_flags=(--draft=false)
+          if [[ "${GITHUB_REF_NAME#v}" == *-* ]]; then
+            publish_flags+=(--prerelease --latest=false)
+          else
+            publish_flags+=(--prerelease=false --latest)
+          fi
+          gh release edit "$GITHUB_REF_NAME" "${publish_flags[@]}"

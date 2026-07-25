@@ -5,12 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Typed Rust wrapper for the SCS Software Telemetry and Input SDKs"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/scs-sdk"
+readme = "README.md"
+exclude = ["AGENTS.md"]
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-scs-sdk-sys = { path = "../scs-sdk-sys" }
+scs-sdk-sys.workspace = true
 
 [lints]
 workspace = true

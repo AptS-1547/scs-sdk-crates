@@ -13,7 +13,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-scs-sdk-plugin = { path = "../../crates/scs-sdk-plugin" }
+scs-sdk-plugin.workspace = true
 
 [lints]
 workspace = true

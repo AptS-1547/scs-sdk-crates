@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "ABI export macros for safe Rust SCS Telemetry and Input plugins"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/scs-sdk-plugin-macros"
+readme = "README.md"
+exclude = ["AGENTS.md"]
 
 [lib]
 proc-macro = true

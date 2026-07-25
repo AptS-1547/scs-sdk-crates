@@ -16,6 +16,17 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/AptS-1547/scs-sdk-crates"
+homepage = "https://github.com/AptS-1547/scs-sdk-crates"
+
+[workspace.dependencies]
+# Public workspace crates use exact synchronized versions. Cargo keeps the
+# local path during workspace development and publishes the version requirement
+# so crates.io consumers cannot accidentally combine incompatible releases.
+scs-sdk = { path = "crates/scs-sdk", version = "=0.1.0" }
+scs-sdk-plugin = { path = "crates/scs-sdk-plugin", version = "=0.1.0" }
+scs-sdk-plugin-macros = { path = "crates/scs-sdk-plugin-macros", version = "=0.1.0" }
+scs-sdk-sys = { path = "crates/scs-sdk-sys", version = "=0.1.0" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
