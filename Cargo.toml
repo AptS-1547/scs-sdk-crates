@@ -4,6 +4,7 @@ members = [
   "crates/scs-sdk-plugin",
   "crates/scs-sdk-plugin-macros",
   "crates/scs-sdk-sys",
+  "examples/telemetry-fallback-plugin",
   "examples/telemetry-plugin",
 ]
 resolver = "3"

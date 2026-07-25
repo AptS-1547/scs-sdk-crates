@@ -333,6 +333,36 @@ scripts/check-plugin-boundary.sh
 
 The script audits both Rust source and `Cargo.toml`, preventing the application from depending directly on `scs-sdk-sys` or using the macro-only, doc-hidden `__private` module to reach the raw ABI. The wrapper and runtime still contain necessary `unsafe` blocks with explicit Safety contracts. Making those blocks disappear cosmetically would hide FFI preconditions rather than improve the boundary.
 
+## Loader fallback E2E example
+
+`examples/telemetry-fallback-plugin/` is a separate manual real-ETS probe for
+the loader rule documented by SCS: the game tries Telemetry API versions from
+newest to oldest and retries only after `scs_telemetry_init` returns
+`SCS_RESULT_unsupported`.
+
+The probe declares API 1.00 as its compatibility minimum so both SDK 1.14
+attempts reach product initialization. It then deliberately rejects 1.01 with
+`SdkError::Unsupported`, accepts exactly 1.00, and registers only two API-1.00
+events plus the scalar truck-speed channel. This is test behavior, not a
+compatibility pattern for ordinary plugins.
+
+The expected `game.log.txt` evidence is, in order:
+
+1. `[scs-sdk-fallback-example] requesting loader retry` for API 1.01 with
+   `result=unsupported`;
+2. `[scs-sdk-fallback-example] rejected attempt cleaned` for API 1.01;
+3. `[scs-sdk-fallback-example] accepted loader fallback` for API 1.00;
+4. framework initialization with `events=2 channels=1`;
+5. `[scs-sdk-fallback-example] fallback callbacks confirmed` under API 1.00,
+   carrying both `frame_end_seen=true` and a decoded `speed_metres_per_second`
+   value so event and channel delivery are independently evidenced;
+6. a clean fallback-session shutdown.
+
+The normal and fallback examples must be installed one at a time. Their macOS
+installers verify the selected artifact first, then remove only the exact
+alternate and legacy example filenames so the game log has one negotiation
+sequence.
+
 ## Workspace
 
 ```text
@@ -342,6 +372,8 @@ crates/scs-sdk-plugin/          safe plugin lifecycle framework
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
   tests/fixtures/export-plugin/ isolated macro compile-pass/fail cdylib workspace
 examples/telemetry-plugin/      safe Rust in-game example cdylib
+examples/telemetry-fallback-plugin/
+                                manual real-ETS API fallback E2E cdylib
 scripts/                        Windows/Linux/macOS builds and artifact verification
 third-party/scs_sdk_1_14/       original official SDK distribution and license
 tmp/                            local investigations, log conclusions, and design notes
@@ -404,6 +436,7 @@ Complete local verification:
 
 ```bash
 cargo fmt --all -- --check
+scripts/check-license-copies.sh
 scripts/check-plugin-boundary.sh
 scripts/check-plugin-macro-fixtures.sh
 cargo test --workspace --locked
@@ -416,6 +449,7 @@ MIRIFLAGS=-Zmiri-strict-provenance \
 
 Test coverage includes:
 
+- byte-identical Apache-2.0 and MIT license copies in every publishable crate;
 - every SDK result code and channel flag;
 - item-by-item raw-name, order, indexing-mode, and duplicate checks across the 107/60/15 catalogs;
 - every primitive and geometry tagged-union decoder;
@@ -434,6 +468,8 @@ Test coverage includes:
 - reverse rollback after partial initialization and reverse unregistration during shutdown;
 - stale-generation callback rejection;
 - stable context provenance and leak-free destruction.
+- exact fallback-probe policy: reject API 1.01, accept API 1.00, and keep the
+  accepted subscription surface compatible with API 1.00.
 
 The workspace uses strict Clippy configuration, in particular rejecting casts that may truncate or lose a sign. Non-test builds additionally reject `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, and `unreachable`.
 
@@ -449,7 +485,7 @@ The workspace uses strict Clippy configuration, in particular rejecting casts th
 | `Miri (scs-sdk-plugin)` | runtime strict provenance, context lifetimes, and stale-generation behavior |
 | `Windows x86-64 plugin` | MinGW release DLLs for both the example and isolated macro fixture, PE32+/x86-64 format, and both dynamic SCS exports |
 | `Linux x86-64 plugin (glibc 2.17)` | Zig release shared objects for both the example and isolated macro fixture, ELF/x86-64 format, and both dynamic SCS exports |
-| `macOS x86-64 plugin` | release dynamic libraries for both the example and isolated macro fixture, Mach-O/x86-64 format, and both external SCS exports |
+| `macOS x86-64 plugin` | release dynamic libraries for the normal example, fallback E2E probe, and isolated macro fixture; Mach-O/x86-64 format, signing, and exact SCS export sets |
 
 CI pins:
 
@@ -461,7 +497,7 @@ cargo-zigbuild:     0.23.0
 Linux glibc floor:  2.17
 ```
 
-The Windows, Linux, and macOS jobs upload plugin artifacts that have passed format and export checks and retain them for seven days. The workflow runs on pushes to `master`, pull requests targeting `master`, and manual dispatch. It runs automatically only when the SDK foundation, build scripts, toolchain, or workflow itself changes; standalone edits to the README or later web directories do not trigger the complete Miri and cross-platform build suite.
+The Windows, Linux, and macOS jobs upload plugin artifacts that have passed format and export checks and retain them for seven days. The macOS job additionally uploads the manual fallback E2E artifact under a distinct name. The workflow runs on pushes to `master`, pull requests targeting `master`, and manual dispatch. It runs automatically only when the SDK foundation, examples, build scripts, toolchain, or workflow itself changes; standalone edits to the README or later web directories do not trigger the complete Miri and cross-platform build suite.
 
 ## Building and verification
 
@@ -551,6 +587,34 @@ An existing artifact can also be verified independently:
 scripts/verify-macos-plugin.sh PATH_TO_DYNAMIC_LIBRARY
 ```
 
+### macOS loader fallback E2E
+
+Build the intentionally version-rejecting probe separately from the normal
+example:
+
+```bash
+scripts/build-macos-fallback-plugin.sh
+```
+
+Artifact:
+
+```text
+target/x86_64-apple-darwin/release/libscs_sdk_telemetry_fallback_example.dylib
+```
+
+The build applies the same x86-64, code-signing, and exact-export verification
+as the normal plugin. Install it as the sole example probe with:
+
+```bash
+scripts/install-macos-fallback-plugin.sh
+```
+
+Return to the normal six-event/eight-channel example with:
+
+```bash
+scripts/install-macos-plugin.sh
+```
+
 ### Isolated proc-macro fixture
 
 Check only the passing/failing compilation contracts, formatting, Clippy, and safe source:
@@ -628,7 +692,6 @@ The current probe uses this log prefix:
 ```text
 [scs-sdk-example]
 ```
-
 
 ## License
 

@@ -1,14 +1,14 @@
 [package]
-name = "scs-sdk-telemetry-example"
+name = "scs-sdk-telemetry-fallback-example"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Safe Rust telemetry plugin example for the SCS SDK crates"
+description = "Manual ETS2 loader fallback E2E probe for the SCS SDK crates"
 publish = false
 
 [lib]
-name = "scs_sdk_telemetry_example"
+name = "scs_sdk_telemetry_fallback_example"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 

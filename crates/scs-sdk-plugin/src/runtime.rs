@@ -1502,6 +1502,96 @@ mod tests {
         drop(v100_owner);
     }
 
+    #[derive(Default)]
+    struct ProductFallbackCounts {
+        attempts: AtomicUsize,
+        shutdowns: AtomicUsize,
+    }
+
+    struct ProductFallbackPlugin {
+        counts: Arc<ProductFallbackCounts>,
+    }
+
+    impl TelemetryPlugin for ProductFallbackPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Product fallback test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            test_compatibility()
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            self.counts.attempts.fetch_add(1, Ordering::Relaxed);
+            if context.telemetry_api_version() != TelemetryApiVersion::V1_00 {
+                return Err(PluginError::new(
+                    SdkError::Unsupported,
+                    "test plugin requests loader fallback to telemetry API 1.0",
+                ));
+            }
+
+            context.subscribe_event(Event::Started)?;
+            context.subscribe_event(Event::FrameEnd)?;
+            context.subscribe(channels::truck::SPEED)
+        }
+
+        fn shutdown(&mut self, _context: &mut PluginContext<'_>) {
+            self.counts.shutdowns.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn product_rejection_allows_the_same_runtime_to_accept_loader_fallback() {
+        let _serial_guard = serial_guard();
+        harness().reset();
+
+        let owner = TestRuntimeOwner::new();
+        let runtime = owner.runtime();
+        let counts = Arc::new(ProductFallbackCounts::default());
+
+        // This first attempt reaches product initialization, unlike the
+        // unknown-layout test above. Returning exactly Unsupported must leave
+        // the runtime idle and invoke attempt-local product cleanup before the
+        // engine retries an older version.
+        assert_eq!(
+            initialize_without_counts_at(
+                runtime,
+                TelemetryApiVersion::V1_01,
+                ProductFallbackPlugin {
+                    counts: Arc::clone(&counts),
+                },
+            ),
+            sys::SCS_RESULT_UNSUPPORTED,
+        );
+        assert_eq!(counts.attempts.load(Ordering::Relaxed), 1);
+        assert_eq!(counts.shutdowns.load(Ordering::Relaxed), 1);
+        assert!(harness().events.is_empty());
+        assert!(harness().channels.is_empty());
+
+        assert_eq!(
+            initialize_without_counts_at(
+                runtime,
+                TelemetryApiVersion::V1_00,
+                ProductFallbackPlugin {
+                    counts: Arc::clone(&counts),
+                },
+            ),
+            sys::SCS_RESULT_OK,
+        );
+        assert_eq!(counts.attempts.load(Ordering::Relaxed), 2);
+        assert_eq!(counts.shutdowns.load(Ordering::Relaxed), 1);
+        assert_eq!(harness().events.len(), 2);
+        assert_eq!(harness().channels.len(), 1);
+        assert_eq!(harness().channels[0].name, b"truck.speed");
+
+        runtime.shutdown();
+        assert_eq!(counts.shutdowns.load(Ordering::Relaxed), 2);
+        assert!(harness().events.is_empty());
+        assert!(harness().channels.is_empty());
+        harness().reset();
+        drop(owner);
+    }
+
     #[test]
     fn plugin_compatibility_separates_framework_adapters_from_product_requirements() {
         static ETS2_FROM_1_14: [crate::GameCompatibility; 1] = [crate::GameCompatibility::new(

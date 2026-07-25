@@ -321,6 +321,33 @@ scripts/check-plugin-boundary.sh
 
 该脚本同时审计 Rust 源码和 `Cargo.toml`，防止应用直接依赖 `scs-sdk-sys`，也防止手写代码借宏专用的 doc-hidden `__private` 模块绕回 raw ABI。wrapper/runtime 中仍会保留必要且有 Safety contract 的 `unsafe`；要求它们表面上也完全消失，只会把 FFI 前提藏起来，而不是让边界更可靠。
 
+## Loader fallback E2E 示例
+
+`examples/telemetry-fallback-plugin/` 是独立的真实 ETS 手动探针，专门验证
+SCS 文档规定的 loader 规则：游戏从最新到最旧尝试 Telemetry API，且仅当
+`scs_telemetry_init` 返回 `SCS_RESULT_unsupported` 时继续重试旧版本。
+
+该探针把 API 1.00 声明为 compatibility minimum，使 SDK 1.14 的两次尝试都能
+进入产品初始化；随后故意以 `SdkError::Unsupported` 拒绝 1.01，只接受精确的
+1.00，并且只注册两个 API 1.00 event 与 scalar truck-speed channel。这是测试行为，
+不是普通产品插件的兼容策略。
+
+`game.log.txt` 应按顺序出现：
+
+1. API 1.01 的 `[scs-sdk-fallback-example] requesting loader retry`，并带有
+   `result=unsupported`；
+2. API 1.01 的 `[scs-sdk-fallback-example] rejected attempt cleaned`；
+3. API 1.00 的 `[scs-sdk-fallback-example] accepted loader fallback`；
+4. framework 初始化结果 `events=2 channels=1`；
+5. API 1.00 下的 `[scs-sdk-fallback-example] fallback callbacks confirmed`，且
+   同时带有 `frame_end_seen=true` 与已经解码的 `speed_metres_per_second`，分别
+   证明 event 和 channel delivery；
+6. clean fallback-session shutdown。
+
+普通示例与 fallback 示例一次只安装一个。两个 macOS installer 都会先验证新
+产物，再移除另一个示例和 legacy 示例的精确文件名，使日志中只保留一条 negotiation
+序列。
+
 ## Workspace
 
 ```text
@@ -330,6 +357,8 @@ crates/scs-sdk-plugin/          safe plugin 生命周期框架
 crates/scs-sdk-plugin-macros/   SCS entry-point proc macro
   tests/fixtures/export-plugin/ 独立宏 compile-pass/fail cdylib workspace
 examples/telemetry-plugin/      safe Rust 实机示例 cdylib
+examples/telemetry-fallback-plugin/
+                                真实 ETS API fallback 手动 E2E cdylib
 scripts/                        Windows/Linux/macOS 构建与产物验证
 third-party/scs_sdk_1_14/       官方 SDK 原始分发与许可证
 tmp/                            本地调查、日志结论和设计笔记
@@ -392,6 +421,7 @@ brew install mingw-w64 zig
 
 ```bash
 cargo fmt --all -- --check
+scripts/check-license-copies.sh
 scripts/check-plugin-boundary.sh
 scripts/check-plugin-macro-fixtures.sh
 cargo test --workspace --locked
@@ -404,6 +434,7 @@ MIRIFLAGS=-Zmiri-strict-provenance \
 
 测试覆盖包括：
 
+- 每个可发布 crate 内与仓库根目录逐字节一致的 Apache-2.0 与 MIT 许可证副本；
 - 所有 SDK result code 与 channel flag；
 - 107/60/15 catalog 的逐项 raw 名称比对、顺序、索引模式和重复项；
 - 每种 primitive/geometry tagged-union 解码；
@@ -422,6 +453,8 @@ MIRIFLAGS=-Zmiri-strict-provenance \
 - partial-init 逆序回滚与 shutdown 逆序注销；
 - stale generation callback 拦截；
 - stable context provenance 与无泄漏销毁。
+- fallback probe 精确策略：拒绝 API 1.01、接受 API 1.00，并保持 accepted
+  subscription surface 与 API 1.00 兼容。
 
 workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号位的 cast；非测试构建同时拒绝 `unwrap`、`expect`、`panic`、`todo`、`unimplemented` 和 `unreachable`。
 
@@ -437,7 +470,7 @@ workspace 使用严格 Clippy 配置，尤其拒绝可能截断或丢失符号�
 | `Miri (scs-sdk-plugin)` | runtime strict provenance、context 生命周期和 stale generation 验证 |
 | `Windows x86-64 plugin` | 示例与独立宏 fixture 的 MinGW release DLL、PE32+/x86-64 和两个 SCS dynamic exports |
 | `Linux x86-64 plugin (glibc 2.17)` | 示例与独立宏 fixture 的 Zig release shared object、ELF/x86-64 和两个 SCS dynamic exports |
-| `macOS x86-64 plugin` | 示例与独立宏 fixture 的 release dynamic library、Mach-O/x86-64 和两个 SCS external exports |
+| `macOS x86-64 plugin` | 普通示例、fallback E2E probe 与独立宏 fixture 的 release dynamic library；Mach-O/x86-64、签名和精确 SCS export 集合 |
 
 CI 固定使用：
 
@@ -449,7 +482,7 @@ cargo-zigbuild:     0.23.0
 Linux glibc floor:  2.17
 ```
 
-Windows、Linux 与 macOS job 会上传已经通过格式及导出检查的插件产物，保留 7 天。workflow 支持 `master` push、面向 `master` 的 pull request 和手动触发；只有 SDK 基座、构建脚本、工具链或 workflow 自身变化时才运行，README 与后续网页目录里的独立改动不会触发整套 Miri 和跨平台构建。
+Windows、Linux 与 macOS job 会上传已经通过格式及导出检查的插件产物，保留 7 天；macOS job 还会用独立名称上传手动 fallback E2E artifact。workflow 支持 `master` push、面向 `master` 的 pull request 和手动触发；只有 SDK 基座、example、构建脚本、工具链或 workflow 自身变化时才运行，README 与后续网页目录里的独立改动不会触发整套 Miri 和跨平台构建。
 
 ## 构建与验证
 
@@ -537,6 +570,33 @@ ad-hoc signature 能为本地构建提供可验证的 code directory，但它不
 
 ```bash
 scripts/verify-macos-plugin.sh PATH_TO_DYNAMIC_LIBRARY
+```
+
+### macOS loader fallback E2E
+
+与普通示例分开构建这个故意拒绝新版 API 的探针：
+
+```bash
+scripts/build-macos-fallback-plugin.sh
+```
+
+产物：
+
+```text
+target/x86_64-apple-darwin/release/libscs_sdk_telemetry_fallback_example.dylib
+```
+
+构建脚本使用和普通插件相同的 x86-64、code signing 与精确 export 验证。将它作为
+唯一示例探针安装：
+
+```bash
+scripts/install-macos-fallback-plugin.sh
+```
+
+切回普通 6-event/8-channel 示例：
+
+```bash
+scripts/install-macos-plugin.sh
 ```
 
 ### Proc-macro 独立 fixture

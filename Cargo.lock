@@ -57,6 +57,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scs-sdk-telemetry-fallback-example"
+version = "0.1.0"
+dependencies = [
+ "scs-sdk-plugin",
+]
+
+[[package]]
 name = "syn"
 version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"

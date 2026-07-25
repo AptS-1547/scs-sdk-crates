@@ -7,12 +7,15 @@ on:
       - '.cargo/**'
       - '.github/workflows/rust.yml'
       - 'examples/telemetry-plugin/**'
+      - 'examples/telemetry-fallback-plugin/**'
       - 'crates/scs-sdk-sys/**'
       - 'crates/scs-sdk/**'
       - 'crates/scs-sdk-plugin/**'
       - 'crates/scs-sdk-plugin-macros/**'
       - 'scripts/**'
       - 'third-party/scs_sdk_1_14/**'
+      - 'LICENSE-APACHE'
+      - 'LICENSE-MIT'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
@@ -22,12 +25,15 @@ on:
       - '.cargo/**'
       - '.github/workflows/rust.yml'
       - 'examples/telemetry-plugin/**'
+      - 'examples/telemetry-fallback-plugin/**'
       - 'crates/scs-sdk-sys/**'
       - 'crates/scs-sdk/**'
       - 'crates/scs-sdk-plugin/**'
       - 'crates/scs-sdk-plugin-macros/**'
       - 'scripts/**'
       - 'third-party/scs_sdk_1_14/**'
+      - 'LICENSE-APACHE'
+      - 'LICENSE-MIT'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
@@ -75,6 +81,9 @@ jobs:
 
       - name: Check shell syntax
         run: bash -n scripts/*.sh
+
+      - name: Check published crate license copies
+        run: scripts/check-license-copies.sh
 
       - name: Check safe application boundary
         run: scripts/check-plugin-boundary.sh
@@ -253,6 +262,9 @@ jobs:
       - name: Build and verify macOS plugin
         run: scripts/build-macos-plugin.sh
 
+      - name: Build and verify macOS fallback E2E plugin
+        run: scripts/build-macos-fallback-plugin.sh
+
       - name: Build and verify macOS macro fixture
         run: scripts/build-macos-plugin-macro-fixture.sh
 
@@ -263,3 +275,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: target/x86_64-apple-darwin/release/libscs_sdk_telemetry_example.dylib
+
+      - name: Upload macOS fallback E2E plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: scs-sdk-telemetry-fallback-e2e-macos-x86-64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: target/x86_64-apple-darwin/release/libscs_sdk_telemetry_fallback_example.dylib

@@ -274,7 +274,47 @@ impl TelemetryExample {
         ));
     }
 
-    /// Logs the gameplay events currently relevant to dispatch job accounting.
+    /// Logs a paid ferry or train journey with the complete SDK payload.
+    ///
+    /// Ferry and train events expose the same five attributes. Keeping their
+    /// decoding in one helper makes it easy to compare real-game evidence while
+    /// the caller still names each event explicitly in [`Self::log_gameplay`].
+    fn log_paid_transport(
+        context: &PluginContext<'_>,
+        event: GameplayEvent<'_>,
+        transport: &'static str,
+    ) {
+        let amount = event
+            .get(gameplay::attributes::PAY_AMOUNT)
+            .unwrap_or_default();
+        let source_name = event
+            .string_owned(gameplay::attributes::SOURCE_NAME)
+            .unwrap_or_default();
+        let source_id = event
+            .string_owned(gameplay::attributes::SOURCE_ID)
+            .unwrap_or_default();
+        let target_name = event
+            .string_owned(gameplay::attributes::TARGET_NAME)
+            .unwrap_or_default();
+        let target_id = event
+            .string_owned(gameplay::attributes::TARGET_ID)
+            .unwrap_or_default();
+
+        context.message(format_args!(
+            concat!(
+                "[scs-sdk-example] {} used amount={} ",
+                "source={}({}) target={}({})"
+            ),
+            transport, amount, source_name, source_id, target_name, target_id,
+        ));
+    }
+
+    /// Logs all six gameplay events defined by the SDK 1.14 header.
+    ///
+    /// The example keeps every branch explicit even though SCS delivers them
+    /// through one generic gameplay callback. Besides making the application
+    /// boundary readable, this gives real ETS2 tests a distinct marker for
+    /// every official payload shape.
     fn log_gameplay(context: &PluginContext<'_>, event: GameplayEvent<'_>) {
         if event.is(gameplay::events::JOB_DELIVERED) {
             let revenue = event.get(gameplay::attributes::REVENUE).unwrap_or_default();
@@ -336,6 +376,17 @@ impl TelemetryExample {
                 ),
                 offence_raw, offence_known, amount,
             ));
+        } else if event.is(gameplay::events::PLAYER_TOLLGATE_PAID) {
+            let amount = event
+                .get(gameplay::attributes::PAY_AMOUNT)
+                .unwrap_or_default();
+            context.message(format_args!(
+                "[scs-sdk-example] tollgate paid amount={amount}"
+            ));
+        } else if event.is(gameplay::events::PLAYER_USE_FERRY) {
+            Self::log_paid_transport(context, event, "ferry");
+        } else if event.is(gameplay::events::PLAYER_USE_TRAIN) {
+            Self::log_paid_transport(context, event, "train");
         }
     }
 }

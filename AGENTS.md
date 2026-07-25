@@ -51,6 +51,9 @@ Dependency and ownership rules:
 - examples/telemetry-plugin is an example and an end-to-end boundary fixture,
   not a hidden product crate. Keep its state and behavior useful for real ETS2
   validation, but do not put bridge, web, dispatcher, or save-game features in it.
+- examples/telemetry-fallback-plugin is a manual real-ETS loader negotiation
+  fixture. It intentionally rejects Telemetry API 1.01 with `Unsupported`,
+  accepts exactly 1.00, and must remain isolated from the normal example.
 - Do not create dependency cycles or let higher-level concerns leak into lower
   layers. The intended direction is sys -> sdk -> plugin -> application.
 
@@ -226,6 +229,9 @@ For changes to SDK coverage:
   not re-sign the ETS2 application bundle or replace SCS's Developer ID identity.
 - Avoid installing two plugin filenames side by side. The installer may remove
   only the exact known legacy example filename after the new artifact verifies.
+- The normal and fallback E2E examples are mutually exclusive installations.
+  Their installers may remove only each other's exact known filenames after the
+  newly selected artifact has passed format, signature, and export validation.
 - Game Archive Packer is for SCS game/mod archives; it is not the packaging format
   for native telemetry DLL, shared-object, or dylib plugins.
 
@@ -280,6 +286,7 @@ work complete, run the full local gate where required toolchains are present:
 
     cargo fmt --all -- --check
     bash -n scripts/*.sh
+    scripts/check-license-copies.sh
     scripts/check-plugin-boundary.sh
     scripts/check-plugin-macro-fixtures.sh
     cargo test --workspace --locked

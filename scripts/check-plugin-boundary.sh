@@ -3,7 +3,16 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-plugin_source="${1:-$repo_root/examples/telemetry-plugin}"
+
+# With no explicit path, audit every handwritten application example. Calls
+# from isolated fixtures still pass one directory and reuse the same rules.
+if [[ $# -eq 0 ]]; then
+  "$0" "$repo_root/examples/telemetry-plugin"
+  "$0" "$repo_root/examples/telemetry-fallback-plugin"
+  exit 0
+fi
+
+plugin_source="$1"
 
 if [[ ! -d "$plugin_source" || ! -f "$plugin_source/Cargo.toml" ]]; then
   printf 'Plugin crate does not exist or has no Cargo.toml: %s\n' "$plugin_source" >&2
