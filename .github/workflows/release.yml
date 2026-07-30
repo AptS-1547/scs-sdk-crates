@@ -37,6 +37,15 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_TAG }}
 
+      # Manual recovery uses the current default-branch validation helper while
+      # keeping the release source pinned to the immutable tag above.
+      - name: Checkout workflow helpers
+        uses: actions/checkout@v6
+        with:
+          path: .release-workflow
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+
       - name: Setup pinned Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
         with:
@@ -47,7 +56,7 @@ jobs:
         with:
           shared-key: release-validation-v1
 
-      - name: Validate tag, version, and release branch
+      - name: Validate tag, version, release branch, and changelog
         shell: bash
         run: |
           scripts/check-release-version.sh "$RELEASE_TAG"
@@ -57,6 +66,13 @@ jobs:
             echo "Release tag $RELEASE_TAG is not contained in origin/master." >&2
             exit 1
           fi
+
+          changelog_file=CHANGELOG.md
+          if [[ ! -f "$changelog_file" ]]; then
+            changelog_file=.release-workflow/CHANGELOG.md
+          fi
+          .release-workflow/scripts/extract-release-changelog.sh \
+            "$RELEASE_TAG" "$changelog_file" /tmp/release-notes.md
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -341,21 +357,13 @@ jobs:
           .release-workflow/scripts/verify-release-assets.sh \
             release-assets "$RELEASE_TAG" complete
 
-      - name: Generate release notes and body
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate release body from changelog
         shell: bash
         run: |
-          gh api --method POST \
-            "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-            -f tag_name="$RELEASE_TAG" \
-            -f target_commitish="$(git rev-list -n 1 "$RELEASE_TAG")" \
-            --jq .body > generated-notes.md
-
           RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE" \
             COSIGN_CERTIFICATE_IDENTITY="https://github.com/$GITHUB_WORKFLOW_REF" \
             .release-workflow/scripts/generate-release-body.sh \
-              "$RELEASE_TAG" generated-notes.md release-body.md
+              "$RELEASE_TAG" release-body.md
 
       - name: Create or refresh draft release
         env:

@@ -309,6 +309,13 @@ starts [the release workflow](.github/workflows/release.yml). The tagged commit
 must be contained in `origin/master`; tags pointing at an unmerged commit are
 rejected before any publication starts.
 
+Before tagging, move the release entries from `Unreleased` into exactly one
+`## [vX.Y.Z] - YYYY-MM-DD` section in [CHANGELOG.md](CHANGELOG.md). The release
+validation job fails before publishing any crate when the version section is
+missing, duplicated, or empty. The GitHub Release body uses that tagged
+changelog section as its `Changes` content instead of GitHub-generated commit
+notes.
+
 The workflow runs the complete quality, package, Miri, and platform gates, then
 publishes the four crates in dependency order:
 

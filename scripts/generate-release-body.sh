@@ -4,9 +4,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_source_root="${RELEASE_SOURCE_ROOT:-$repo_root}"
-release_tag="${1:?usage: generate-release-body.sh RELEASE_TAG GENERATED_NOTES OUTPUT_FILE}"
-generated_notes="${2:?usage: generate-release-body.sh RELEASE_TAG GENERATED_NOTES OUTPUT_FILE}"
-output_file="${3:?usage: generate-release-body.sh RELEASE_TAG GENERATED_NOTES OUTPUT_FILE}"
+release_tag="${1:?usage: generate-release-body.sh RELEASE_TAG OUTPUT_FILE}"
+output_file="${2:?usage: generate-release-body.sh RELEASE_TAG OUTPUT_FILE}"
 repository="${GITHUB_REPOSITORY:-AptS-1547/scs-sdk-crates}"
 
 # A recovery run may execute this generator from a current default-branch
@@ -16,6 +15,18 @@ repository="${GITHUB_REPOSITORY:-AptS-1547/scs-sdk-crates}"
 version="${release_tag#v}"
 base_url="https://github.com/$repository/releases/download/$release_tag"
 workflow_identity="${COSIGN_CERTIFICATE_IDENTITY:-https://github.com/$repository/.github/workflows/release.yml@refs/tags/$release_tag}"
+
+changelog_file="$release_source_root/CHANGELOG.md"
+if [[ ! -f "$changelog_file" && "$release_source_root" != "$repo_root" ]]; then
+  # Tags published before CHANGELOG.md was introduced can still be resumed by
+  # using the backfilled historical entry from the current workflow checkout.
+  changelog_file="$repo_root/CHANGELOG.md"
+fi
+
+release_notes="$(mktemp "${TMPDIR:-/tmp}/scs-sdk-release-notes.XXXXXX")"
+trap 'rm -f "$release_notes"' EXIT
+"$repo_root/scripts/extract-release-changelog.sh" \
+  "$release_tag" "$changelog_file" "$release_notes"
 
 windows_archive="scs-sdk-crates-$release_tag-windows-x86_64.zip"
 linux_archive="scs-sdk-crates-$release_tag-linux-x86_64-glibc-2.17.tar.gz"
@@ -27,6 +38,14 @@ plugins for every SCS-supported desktop platform.
 
 本次发布包含四个可复用 Rust crate，以及 SCS 支持的三个桌面平台上经过验证的
 x86-64 example 插件。
+
+## Changes
+
+EOF
+
+cat "$release_notes" >>"$output_file"
+
+cat >>"$output_file" <<EOF
 
 ## Platform archives / 平台归档
 
@@ -79,16 +98,6 @@ sha256sum -c checksums.txt
 
 On macOS, \`shasum -a 256 -c checksums.txt\` can be used for the final hash
 check.
-
-## Changes
-
 EOF
-
-if [[ -s "$generated_notes" ]]; then
-  cat "$generated_notes" >>"$output_file"
-else
-  printf 'See the repository history for changes included in %s.\n' \
-    "$release_tag" >>"$output_file"
-fi
 
 printf 'Generated release body: %s\n' "$output_file"

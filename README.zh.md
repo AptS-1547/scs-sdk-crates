@@ -286,6 +286,12 @@ build 还会为本地加载应用并验证 ad-hoc signature；这不等于 Devel
 [Release workflow](.github/workflows/release.yml)。tag 指向的提交必须已经包含在
 `origin/master` 中；指向未合并提交的 tag 会在任何发布动作开始前被拒绝。
 
+打 tag 前，需要把 `Unreleased` 中的发布条目整理到 [CHANGELOG.md](CHANGELOG.md) 内
+唯一的 `## [vX.Y.Z] - YYYY-MM-DD` section。版本 section 缺失、重复或内容为空时，
+Release validation job 会在发布任何 crate 之前失败；GitHub Release Body 的
+`Changes` 内容直接取自 tag 内的对应 changelog section，不再采用 GitHub 根据
+commit 自动生成的 notes。
+
 Workflow 会先运行完整的质量、package、Miri 与平台 gate，然后按依赖顺序发布四个
 crate：
 
