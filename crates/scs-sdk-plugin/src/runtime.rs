@@ -566,12 +566,13 @@ impl Runtime {
                 ));
             }
 
-            // SAFETY: The stable context records its generation, the callback
-            // uses the SDK ABI, catches panics, and decodes event data only for
-            // the matching event kind.
-            if let Err(error) =
-                unsafe { call.register_event(event, event_trampoline, event_context) }
-            {
+            // SAFETY: The `Arc` allocation backing `event_context` has a stable
+            // address and stays retained until successful unregistration or
+            // conservative retirement. The trampoline has the exact SDK ABI,
+            // contains panics, checks its generation, and decodes only the
+            // registered event kind.
+            let result = unsafe { call.register_event(event, event_trampoline, event_context) };
+            if let Err(error) = result {
                 if registration_ref
                     .requirement
                     .tolerates_event_registration_error(error)
@@ -642,6 +643,10 @@ impl Runtime {
                 continue;
             }
 
+            // SAFETY: The registered name and stable context allocation remain
+            // retained for the full registration lifetime. The trampoline has
+            // the exact SDK ABI, contains panics, validates the received tag,
+            // and rejects callbacks from stale generations.
             let result = unsafe {
                 call.register_erased_channel(
                     &registration_ref.spec.registered_name,
@@ -818,6 +823,10 @@ impl Runtime {
             {
                 continue;
             }
+            // SAFETY: This reverse pass runs synchronously during SDK shutdown.
+            // The registered name and context remain allocated until success;
+            // on failure `finish_generation` retires the still-registered
+            // allocation instead of releasing foreign callback storage.
             let result = unsafe {
                 call.unregister_erased_channel(
                     &registration_ref.spec.registered_name,
@@ -863,6 +872,10 @@ impl Runtime {
                 continue;
             }
             let event = registration_ref.event;
+            // SAFETY: This reverse pass runs synchronously during SDK shutdown,
+            // and the event context remains allocated until unregistration
+            // succeeds. A failure leaves it marked registered so generation
+            // finalization retains it conservatively.
             let result = unsafe { call.unregister_event(event) };
             match result {
                 Ok(()) => {
@@ -975,64 +988,66 @@ impl Runtime {
             return;
         }
 
+        let dispatch = |call: &SdkCall<'_>| {
+            // `raw_event` was checked against this registration's typed
+            // descriptor above. Decode by that canonical descriptor rather
+            // than maintaining another raw-number-to-event table here.
+            let event = match registration.event {
+                Event::FrameStart => {
+                    // SAFETY: SCS associates a live frame-start structure
+                    // with this exact event discriminator.
+                    let Some(frame) = (unsafe { FrameStartRef::from_event_info(event_info) })
+                    else {
+                        return;
+                    };
+                    TelemetryEvent::FrameStart(frame)
+                }
+                Event::FrameEnd => TelemetryEvent::FrameEnd,
+                Event::Paused => TelemetryEvent::Paused,
+                Event::Started => TelemetryEvent::Started,
+                Event::Configuration => {
+                    // SAFETY: SCS associates a live configuration structure
+                    // with this exact event discriminator.
+                    let Some(configuration) =
+                        (unsafe { scs_sdk::ConfigurationRef::from_event_info(event_info) })
+                    else {
+                        return;
+                    };
+                    TelemetryEvent::Configuration(ConfigurationEvent::new(configuration))
+                }
+                Event::Gameplay => {
+                    // SAFETY: SCS associates a live gameplay structure with
+                    // this exact event discriminator.
+                    let Some(gameplay) =
+                        (unsafe { scs_sdk::GameplayEventRef::from_event_info(event_info) })
+                    else {
+                        return;
+                    };
+                    TelemetryEvent::Gameplay(GameplayEvent::new(gameplay))
+                }
+            };
+
+            let mut state = self.lock_state();
+            if state.generation != generation
+                || !matches!(state.lifecycle, Lifecycle::Initializing | Lifecycle::Active)
+            {
+                return;
+            }
+            let Some(plugin) = state.plugin.as_deref_mut() else {
+                return;
+            };
+            let mut context = PluginContext::callback(call, game);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                plugin.event(&mut context, event);
+            }));
+            if result.is_err() {
+                context.error(format_args!("plugin panicked while handling an event"));
+            }
+        };
+
         // SAFETY: This function is reached only from `event_trampoline`, a
         // direct callback from SCS on the active SDK thread.
-        unsafe {
-            session.with_call(|call| {
-                // `raw_event` was checked against this registration's typed
-                // descriptor above. Decode by that canonical descriptor rather
-                // than maintaining another raw-number-to-event table here.
-                let event = match registration.event {
-                    Event::FrameStart => {
-                        // SAFETY: SCS associates a live frame-start structure
-                        // with this exact event discriminator.
-                        let Some(frame) = FrameStartRef::from_event_info(event_info) else {
-                            return;
-                        };
-                        TelemetryEvent::FrameStart(frame)
-                    }
-                    Event::FrameEnd => TelemetryEvent::FrameEnd,
-                    Event::Paused => TelemetryEvent::Paused,
-                    Event::Started => TelemetryEvent::Started,
-                    Event::Configuration => {
-                        // SAFETY: SCS associates a live configuration structure
-                        // with this exact event discriminator.
-                        let Some(configuration) =
-                            scs_sdk::ConfigurationRef::from_event_info(event_info)
-                        else {
-                            return;
-                        };
-                        TelemetryEvent::Configuration(ConfigurationEvent::new(configuration))
-                    }
-                    Event::Gameplay => {
-                        // SAFETY: SCS associates a live gameplay structure with
-                        // this exact event discriminator.
-                        let Some(gameplay) = scs_sdk::GameplayEventRef::from_event_info(event_info)
-                        else {
-                            return;
-                        };
-                        TelemetryEvent::Gameplay(GameplayEvent::new(gameplay))
-                    }
-                };
-
-                let mut state = self.lock_state();
-                if state.generation != generation
-                    || !matches!(state.lifecycle, Lifecycle::Initializing | Lifecycle::Active)
-                {
-                    return;
-                }
-                let Some(plugin) = state.plugin.as_deref_mut() else {
-                    return;
-                };
-                let mut context = PluginContext::callback(call, game);
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    plugin.event(&mut context, event);
-                }));
-                if result.is_err() {
-                    context.error(format_args!("plugin panicked while handling an event"));
-                }
-            });
-        }
+        unsafe { session.with_call(dispatch) };
     }
 
     fn dispatch_channel(

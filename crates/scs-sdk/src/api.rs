@@ -461,6 +461,8 @@ mod tests {
         EVENT_REGISTRATIONS.store(0, Ordering::Relaxed);
         let parameters = parameters();
         let pointer = (&raw const parameters).cast::<sys::ScsTelemetryInitParams>();
+        // SAFETY: `pointer` comes from the live, correctly aligned V1.01
+        // fixture above, whose strings and function table outlive `api`.
         let api = unsafe { TelemetryApi::from_raw(TelemetryApiVersion::V1_01, pointer) }
             .expect("valid function table");
 
@@ -468,6 +470,8 @@ mod tests {
         assert_eq!(api.game_schema_version(), GameSchemaVersion::new(1, 60));
         api.with_call(|call| {
             call.logger().message(c"initializing");
+            // SAFETY: The fixture callback has the exact SDK ABI, contains no
+            // unwinding path, and the null context is never dereferenced.
             unsafe {
                 call.register_event(Event::Started, fake_event_callback, core::ptr::null_mut())
             }
@@ -475,6 +479,9 @@ mod tests {
         });
 
         let session = api.session();
+        // SAFETY: This synthetic call models a direct main-thread callback
+        // while `api` and its function table remain live, and the closure does
+        // not let the scoped call capability escape.
         unsafe {
             session.with_call(|call| call.logger().message(c"callback"));
         }
@@ -495,6 +502,8 @@ mod tests {
             1, 2
         )));
 
+        // SAFETY: An unsupported version must be rejected before the null
+        // parameter pointer is inspected; this call exercises that contract.
         let result = unsafe {
             TelemetryApi::from_raw(
                 TelemetryApiVersion::new(1, 2),

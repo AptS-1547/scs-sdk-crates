@@ -86,6 +86,9 @@ impl FrameStartRef<'_> {
     /// [`sys::ScsTelemetryFrameStart`], and remain valid for the returned view.
     #[must_use]
     pub unsafe fn from_event_info(event_info: *const c_void) -> Option<Self> {
+        // SAFETY: The caller guarantees that a non-null pointer is aligned,
+        // initialized as `ScsTelemetryFrameStart`, and valid for the view's
+        // lifetime. `as_ref` additionally maps a null pointer to `None`.
         unsafe { event_info.cast::<sys::ScsTelemetryFrameStart>().as_ref() }.map(|raw| Self { raw })
     }
 
@@ -206,11 +209,17 @@ impl<'a> Iterator for NamedValues<'a> {
     type Item = NamedValueRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: `from_ptr` requires a contiguous array that remains valid
+        // through its null-name terminator. `current` starts at its first entry
+        // and advances only after observing a non-terminal entry.
         let raw = unsafe { self.current.as_ref() }?;
         if raw.name.is_null() {
             return None;
         }
 
+        // SAFETY: A non-null name identifies a non-terminal entry, so the
+        // constructor contract guarantees that the next contiguous entry
+        // exists, possibly as the required terminator.
         self.current = unsafe { self.current.add(1) };
         Some(NamedValueRef { raw })
     }
@@ -232,6 +241,9 @@ impl<'a> ConfigurationRef<'a> {
     /// [`NamedValues::from_ptr`]. All referenced data must remain alive for `'a`.
     #[must_use]
     pub unsafe fn from_event_info(event_info: *const c_void) -> Option<Self> {
+        // SAFETY: The caller guarantees that a non-null pointer is aligned,
+        // initialized as `ScsTelemetryConfiguration`, and valid together with
+        // all referenced strings and attributes for the returned lifetime.
         unsafe { event_info.cast::<sys::ScsTelemetryConfiguration>().as_ref() }
             .map(|raw| Self { raw })
     }
@@ -311,6 +323,9 @@ impl<'a> GameplayEventRef<'a> {
     /// [`NamedValues::from_ptr`]. All referenced data must remain alive for `'a`.
     #[must_use]
     pub unsafe fn from_event_info(event_info: *const c_void) -> Option<Self> {
+        // SAFETY: The caller guarantees that a non-null pointer is aligned,
+        // initialized as `ScsTelemetryGameplayEvent`, and valid together with
+        // all referenced strings and attributes for the returned lifetime.
         unsafe { event_info.cast::<sys::ScsTelemetryGameplayEvent>().as_ref() }
             .map(|raw| Self { raw })
     }
@@ -437,6 +452,8 @@ mod tests {
             },
         ];
 
+        // SAFETY: `attributes` is contiguous, ends with a null-name entry, and
+        // its name, string value, and storage outlive the iterator.
         let values = unsafe { NamedValues::from_ptr(attributes.as_ptr()) };
         let cargo = values
             .find(cargo_name)
@@ -476,6 +493,8 @@ mod tests {
             },
         ];
 
+        // SAFETY: `attributes` is contiguous, ends with a null-name entry, and
+        // its initialized signed-32 value remains live during iteration.
         let values = unsafe { NamedValues::from_ptr(attributes.as_ptr()) };
         let index = SdkIndex::new(2).expect("ordinary array index");
         assert_eq!(
@@ -527,9 +546,11 @@ mod tests {
                 id: id.as_ptr(),
                 attributes: terminator.as_ptr(),
             };
-            let event =
-                unsafe { ConfigurationRef::from_event_info((&raw const raw).cast::<c_void>()) }
-                    .expect("configuration fixture");
+            let event_info = (&raw const raw).cast::<c_void>();
+            // SAFETY: `raw` is aligned and initialized for this iteration; its
+            // ID and terminated attribute array outlive the borrowed event.
+            let event = unsafe { ConfigurationRef::from_event_info(event_info) }
+                .expect("configuration fixture");
             assert_eq!(event.trailer(), expected, "configuration id {id:?}");
             assert_eq!(
                 event.trailer_index(),
@@ -552,6 +573,8 @@ mod tests {
             paused_simulation_time: 13,
         };
         let pointer = (&raw const frame).cast::<c_void>();
+        // SAFETY: `pointer` addresses the live, aligned frame fixture. The
+        // accessors read only initialized fields and deliberately skip padding.
         let frame = unsafe { FrameStartRef::from_event_info(pointer) }.expect("frame start");
 
         assert!(frame.timer_restarted());

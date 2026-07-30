@@ -1555,8 +1555,10 @@ mod tests {
                 value_float: scs_sdk_sys::ScsValueFloat { value: 42.5 },
             },
         };
-        let value =
-            unsafe { ValueRef::from_ptr(&raw const raw) }.expect("test value should be present");
+        let raw_value = &raw const raw;
+        // SAFETY: `raw` is aligned and initialized, its float tag selects the
+        // initialized float member, and it outlives the borrowed update.
+        let value = unsafe { ValueRef::from_ptr(raw_value) }.expect("test value should be present");
         let update = ChannelUpdate::new(
             channels::truck::SPEED.erase(),
             c"truck.speed",
@@ -1580,8 +1582,10 @@ mod tests {
                 value_float: scs_sdk_sys::ScsValueFloat { value: 1.25 },
             },
         };
-        let value =
-            unsafe { ValueRef::from_ptr(&raw const raw) }.expect("test value should be present");
+        let raw_value = &raw const raw;
+        // SAFETY: `raw` is aligned and initialized, its float tag selects the
+        // initialized float member, and it outlives the borrowed update.
+        let value = unsafe { ValueRef::from_ptr(raw_value) }.expect("test value should be present");
         let sdk_index = SdkIndex::new(2).expect("ordinary SDK index");
         let trailer_index = TrailerIndex::new(1).expect("second trailer");
         let update = ChannelUpdate::new(
@@ -1640,6 +1644,8 @@ mod tests {
                 id: c"job".as_ptr(),
                 attributes: attributes.as_ptr(),
             };
+            // SAFETY: The configuration, ID, contiguous terminated attribute
+            // array, and selected string member all remain live for `event`.
             let inner = unsafe {
                 ConfigurationRef::from_event_info((&raw const raw).cast::<std::ffi::c_void>())
             }
@@ -1692,6 +1698,8 @@ mod tests {
                 id: c"controls".as_ptr(),
                 attributes: attributes.as_ptr(),
             };
+            // SAFETY: The configuration, ID, contiguous terminated attribute
+            // array, and selected string member all remain live for `event`.
             let inner = unsafe {
                 ConfigurationRef::from_event_info((&raw const raw).cast::<std::ffi::c_void>())
             }
@@ -1747,6 +1755,8 @@ mod tests {
                 id: c"player.fined".as_ptr(),
                 attributes: attributes.as_ptr(),
             };
+            // SAFETY: The gameplay event, ID, contiguous terminated attribute
+            // array, and selected string member all remain live for `event`.
             let inner = unsafe {
                 GameplayEventRef::from_event_info((&raw const raw).cast::<std::ffi::c_void>())
             }

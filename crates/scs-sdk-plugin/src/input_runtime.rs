@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use scs_sdk::input::{
-    InputApi, InputDeviceInput, InputDeviceRegistration, InputInitCall, InputSession,
+    InputApi, InputCall, InputDeviceInput, InputDeviceRegistration, InputInitCall, InputSession,
 };
 use scs_sdk::{InputApiVersion, SdkError};
 use scs_sdk_sys as sys;
@@ -791,79 +791,79 @@ impl InputRuntime {
             return sys::SCS_RESULT_INVALID_PARAMETER;
         }
 
+        let dispatch = |call: &InputCall<'_>| {
+            let mut state = self.lock_state();
+            if state.generation != registration.generation
+                || !registration.registered.load(Ordering::Acquire)
+                || !matches!(
+                    state.lifecycle,
+                    InputLifecycle::Initializing | InputLifecycle::Active
+                )
+            {
+                return sys::SCS_RESULT_NOT_FOUND;
+            }
+            let Some(plugin) = state.plugin.as_deref_mut() else {
+                return sys::SCS_RESULT_NOT_FOUND;
+            };
+            let mut context =
+                InputPluginContext::callback(call.logger(), call.input_api_version(), game);
+            let request =
+                InputEventRequest::new(registration.id, InputEventFlags::from_raw(raw_flags));
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                plugin.next_input_event(&mut context, request)
+            }));
+            let event = match outcome {
+                Ok(Some(event)) => event,
+                Ok(None) => return sys::SCS_RESULT_NOT_FOUND,
+                Err(_) => {
+                    context.error(format_args!(
+                        "input plugin panicked while producing an event for device {:?}",
+                        registration.name,
+                    ));
+                    return sys::SCS_RESULT_GENERIC_ERROR;
+                }
+            };
+            let Some(expected_type) = registration
+                .inputs
+                .get(event.index().raw() as usize)
+                .map(|input| input.value_type)
+            else {
+                context.error(format_args!(
+                    concat!(
+                        "input plugin returned out-of-range index {} for device {:?} ",
+                        "with {} inputs"
+                    ),
+                    event.index().raw(),
+                    registration.name,
+                    registration.inputs.len(),
+                ));
+                return sys::SCS_RESULT_INVALID_PARAMETER;
+            };
+            if event.value().value_type() != expected_type {
+                context.error(format_args!(
+                    concat!(
+                        "input plugin returned {:?} for device {:?} input {}, ",
+                        "registered as {:?}"
+                    ),
+                    event.value().value_type(),
+                    registration.name,
+                    event.index().raw(),
+                    expected_type,
+                ));
+                return sys::SCS_RESULT_INVALID_PARAMETER;
+            }
+            // SAFETY: `output` was checked non-null and is the live buffer
+            // supplied for this direct callback. The device-local index
+            // and registered value type were validated immediately above.
+            match unsafe { event.write_to(output, expected_type) } {
+                Ok(()) => sys::SCS_RESULT_OK,
+                Err(error) => error.code(),
+            }
+        };
+
         // SAFETY: Dispatch occurs synchronously inside the SCS event callback
         // on the main thread while the copied session is active.
-        unsafe {
-            session.with_call(|call| {
-                let mut state = self.lock_state();
-                if state.generation != registration.generation
-                    || !registration.registered.load(Ordering::Acquire)
-                    || !matches!(
-                        state.lifecycle,
-                        InputLifecycle::Initializing | InputLifecycle::Active
-                    )
-                {
-                    return sys::SCS_RESULT_NOT_FOUND;
-                }
-                let Some(plugin) = state.plugin.as_deref_mut() else {
-                    return sys::SCS_RESULT_NOT_FOUND;
-                };
-                let mut context =
-                    InputPluginContext::callback(call.logger(), call.input_api_version(), game);
-                let request =
-                    InputEventRequest::new(registration.id, InputEventFlags::from_raw(raw_flags));
-                let outcome = catch_unwind(AssertUnwindSafe(|| {
-                    plugin.next_input_event(&mut context, request)
-                }));
-                let event = match outcome {
-                    Ok(Some(event)) => event,
-                    Ok(None) => return sys::SCS_RESULT_NOT_FOUND,
-                    Err(_) => {
-                        context.error(format_args!(
-                            "input plugin panicked while producing an event for device {:?}",
-                            registration.name,
-                        ));
-                        return sys::SCS_RESULT_GENERIC_ERROR;
-                    }
-                };
-                let Some(expected_type) = registration
-                    .inputs
-                    .get(event.index().raw() as usize)
-                    .map(|input| input.value_type)
-                else {
-                    context.error(format_args!(
-                        concat!(
-                            "input plugin returned out-of-range index {} for device {:?} ",
-                            "with {} inputs"
-                        ),
-                        event.index().raw(),
-                        registration.name,
-                        registration.inputs.len(),
-                    ));
-                    return sys::SCS_RESULT_INVALID_PARAMETER;
-                };
-                if event.value().value_type() != expected_type {
-                    context.error(format_args!(
-                        concat!(
-                            "input plugin returned {:?} for device {:?} input {}, ",
-                            "registered as {:?}"
-                        ),
-                        event.value().value_type(),
-                        registration.name,
-                        event.index().raw(),
-                        expected_type,
-                    ));
-                    return sys::SCS_RESULT_INVALID_PARAMETER;
-                }
-                // SAFETY: `output` was checked non-null and is the live buffer
-                // supplied for this direct callback. The device-local index
-                // and registered value type were validated immediately above.
-                match event.write_to(output, expected_type) {
-                    Ok(()) => sys::SCS_RESULT_OK,
-                    Err(error) => error.code(),
-                }
-            })
-        }
+        unsafe { session.with_call(dispatch) }
     }
 
     fn lock_state(&self) -> MutexGuard<'_, InputRuntimeState> {
@@ -1292,18 +1292,18 @@ mod tests {
         assert!(counts.last_active.load(Ordering::Relaxed));
 
         let mut output = MaybeUninit::<sys::ScsInputEvent>::uninit();
-        // SAFETY: The output buffer is writable and belongs to this callback.
-        assert_eq!(
-            unsafe {
-                event(
-                    output.as_mut_ptr(),
-                    sys::SCS_INPUT_EVENT_CALLBACK_FLAG_FIRST_IN_FRAME
-                        | sys::SCS_INPUT_EVENT_CALLBACK_FLAG_FIRST_AFTER_ACTIVATION,
-                    context,
-                )
-            },
-            sys::SCS_RESULT_OK
-        );
+        // SAFETY: `event` and `context` are the exact pair captured during
+        // successful registration, and `output` is aligned writable storage
+        // that remains live for this synchronous callback.
+        let result = unsafe {
+            event(
+                output.as_mut_ptr(),
+                sys::SCS_INPUT_EVENT_CALLBACK_FLAG_FIRST_IN_FRAME
+                    | sys::SCS_INPUT_EVENT_CALLBACK_FLAG_FIRST_AFTER_ACTIVATION,
+                context,
+            )
+        };
+        assert_eq!(result, sys::SCS_RESULT_OK);
         // SAFETY: A successful callback initialized the complete event.
         let output = unsafe { output.assume_init() };
         assert_eq!(output.input_index, 0);
@@ -1311,11 +1311,11 @@ mod tests {
         assert_eq!(unsafe { output.value.value_bool.value }, 1);
 
         let mut exhausted = MaybeUninit::<sys::ScsInputEvent>::uninit();
-        // SAFETY: Same registered callback and context pair.
-        assert_eq!(
-            unsafe { event(exhausted.as_mut_ptr(), 0, context) },
-            sys::SCS_RESULT_NOT_FOUND
-        );
+        // SAFETY: This reuses the live registered callback/context pair and
+        // supplies aligned writable storage. The plugin's exhausted sequence
+        // returns before writing, so the buffer is not subsequently read.
+        let result = unsafe { event(exhausted.as_mut_ptr(), 0, context) };
+        assert_eq!(result, sys::SCS_RESULT_NOT_FOUND);
         runtime.shutdown();
         assert_eq!(counts.shutdown_calls.load(Ordering::Relaxed), 1);
         let state = runtime.lock_state();
@@ -1344,11 +1344,11 @@ mod tests {
             );
             let (_, callback, context) = first_callbacks();
             let mut output = MaybeUninit::<sys::ScsInputEvent>::uninit();
-            // SAFETY: Exact registered callback and stable context.
-            assert_eq!(
-                unsafe { callback(output.as_mut_ptr(), 0, context) },
-                expected
-            );
+            // SAFETY: The fake SDK captured this exact callback with its stable
+            // runtime-owned context, and `output` provides aligned writable
+            // storage for every behavior that reaches event serialization.
+            let result = unsafe { callback(output.as_mut_ptr(), 0, context) };
+            assert_eq!(result, expected);
             runtime.shutdown();
             lock_harness().reset();
             drop(runtime_owner);
@@ -1381,11 +1381,10 @@ mod tests {
 
         let mut output = MaybeUninit::<sys::ScsInputEvent>::uninit();
         // SAFETY: The retired allocation is deliberately retained. This
-        // replay proves the generation is inert rather than dangling.
-        assert_eq!(
-            unsafe { stale_callback(output.as_mut_ptr(), 0, stale_context) },
-            sys::SCS_RESULT_NOT_FOUND
-        );
+        // replay uses the exact captured callback/context pair and aligned
+        // output storage to prove the generation is inert rather than dangling.
+        let result = unsafe { stale_callback(output.as_mut_ptr(), 0, stale_context) };
+        assert_eq!(result, sys::SCS_RESULT_NOT_FOUND);
         assert_eq!(counts.event_calls.load(Ordering::Relaxed), 0);
 
         lock_harness().reset();
@@ -1396,11 +1395,11 @@ mod tests {
             ),
             sys::SCS_RESULT_OK
         );
-        // SAFETY: The prior generation remains allocated but must stay stale.
-        assert_eq!(
-            unsafe { stale_callback(output.as_mut_ptr(), 0, stale_context) },
-            sys::SCS_RESULT_NOT_FOUND
-        );
+        // SAFETY: The prior callback context remains conservatively allocated,
+        // and the same aligned output storage is valid for this synchronous
+        // replay. Its old generation must reject dispatch before writing.
+        let result = unsafe { stale_callback(output.as_mut_ptr(), 0, stale_context) };
+        assert_eq!(result, sys::SCS_RESULT_NOT_FOUND);
         runtime.shutdown();
         lock_harness().reset();
         drop(runtime_owner);
@@ -1421,11 +1420,11 @@ mod tests {
             sys::SCS_RESULT_OK
         );
         let (_, callback, context) = first_callbacks();
-        // SAFETY: Null is deliberate test input for defensive validation.
-        assert_eq!(
-            unsafe { callback(ptr::null_mut(), 0, context) },
-            sys::SCS_RESULT_INVALID_PARAMETER
-        );
+        // SAFETY: `callback` and `context` are the exact registered pair. A
+        // null event output is the deliberate foreign input under test and the
+        // trampoline validates it before any dereference.
+        let result = unsafe { callback(ptr::null_mut(), 0, context) };
+        assert_eq!(result, sys::SCS_RESULT_INVALID_PARAMETER);
         assert_eq!(counts.event_calls.load(Ordering::Relaxed), 0);
         runtime.shutdown();
         lock_harness().reset();

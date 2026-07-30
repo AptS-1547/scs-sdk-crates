@@ -300,11 +300,15 @@ impl<'a> ValueRef<'a> {
     /// # Safety
     ///
     /// `value` must either be null or point to a correctly aligned, initialized
-    /// [`sys::ScsValue`] that remains alive for `'a`. Its type tag must identify
-    /// the initialized union member. String members must be non-null,
+    /// [`sys::ScsValue`] that remains alive for `'a`. For a known type tag, the
+    /// corresponding union member must be initialized. Unknown tags are
+    /// preserved without reading the union. String members must be non-null,
     /// NUL-terminated, and remain alive for the same lifetime.
     #[must_use]
     pub unsafe fn from_ptr(value: *const sys::ScsValue) -> Option<Self> {
+        // SAFETY: The caller guarantees that a non-null pointer is aligned,
+        // initialized as `ScsValue`, and valid for the returned lifetime.
+        // `as_ref` additionally maps a null pointer to `None`.
         unsafe { value.as_ref() }.map(|raw| Self { raw })
     }
 
@@ -321,6 +325,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_bool(self) -> Option<bool> {
         if self.value_type() == Some(ValueType::Bool) {
+            // SAFETY: The checked tag selects the initialized bool member.
             Some(unsafe { self.raw.value.value_bool.value != 0 })
         } else {
             None
@@ -330,6 +335,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_i32(self) -> Option<i32> {
         if self.value_type() == Some(ValueType::I32) {
+            // SAFETY: The checked tag selects the initialized signed-32 member.
             Some(unsafe { self.raw.value.value_s32.value })
         } else {
             None
@@ -339,6 +345,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_u32(self) -> Option<u32> {
         if self.value_type() == Some(ValueType::U32) {
+            // SAFETY: The checked tag selects the initialized unsigned-32 member.
             Some(unsafe { self.raw.value.value_u32.value })
         } else {
             None
@@ -348,6 +355,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_u64(self) -> Option<u64> {
         if self.value_type() == Some(ValueType::U64) {
+            // SAFETY: The checked tag selects the initialized unsigned-64 member.
             Some(unsafe { self.raw.value.value_u64.value })
         } else {
             None
@@ -357,6 +365,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_i64(self) -> Option<i64> {
         if self.value_type() == Some(ValueType::I64) {
+            // SAFETY: The checked tag selects the initialized signed-64 member.
             Some(unsafe { self.raw.value.value_s64.value })
         } else {
             None
@@ -366,6 +375,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_f32(self) -> Option<f32> {
         if self.value_type() == Some(ValueType::F32) {
+            // SAFETY: The checked tag selects the initialized float member.
             Some(unsafe { self.raw.value.value_float.value })
         } else {
             None
@@ -375,6 +385,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_f64(self) -> Option<f64> {
         if self.value_type() == Some(ValueType::F64) {
+            // SAFETY: The checked tag selects the initialized double member.
             Some(unsafe { self.raw.value.value_double.value })
         } else {
             None
@@ -384,6 +395,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_fvector(self) -> Option<FVector> {
         if self.value_type() == Some(ValueType::FVector) {
+            // SAFETY: The checked tag selects the initialized float-vector member.
             Some(unsafe { self.raw.value.value_fvector }.into())
         } else {
             None
@@ -393,6 +405,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_dvector(self) -> Option<DVector> {
         if self.value_type() == Some(ValueType::DVector) {
+            // SAFETY: The checked tag selects the initialized double-vector member.
             Some(unsafe { self.raw.value.value_dvector }.into())
         } else {
             None
@@ -402,6 +415,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_euler(self) -> Option<Euler> {
         if self.value_type() == Some(ValueType::Euler) {
+            // SAFETY: The checked tag selects the initialized Euler member.
             Some(unsafe { self.raw.value.value_euler }.into())
         } else {
             None
@@ -411,6 +425,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_fplacement(self) -> Option<FPlacement> {
         if self.value_type() == Some(ValueType::FPlacement) {
+            // SAFETY: The checked tag selects the initialized float-placement member.
             Some(unsafe { self.raw.value.value_fplacement }.into())
         } else {
             None
@@ -420,6 +435,7 @@ impl<'a> ValueRef<'a> {
     #[must_use]
     pub fn as_dplacement(self) -> Option<DPlacement> {
         if self.value_type() == Some(ValueType::DPlacement) {
+            // SAFETY: The checked tag selects the initialized double-placement member.
             Some(unsafe { self.raw.value.value_dplacement }.into())
         } else {
             None
@@ -432,6 +448,8 @@ impl<'a> ValueRef<'a> {
             return None;
         }
 
+        // SAFETY: The checked tag selects the initialized string member. Its
+        // pointer is validated separately before constructing a `CStr`.
         let pointer = unsafe { self.raw.value.value_string.value };
         if pointer.is_null() {
             return None;
@@ -446,6 +464,14 @@ impl<'a> ValueRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn value_ref(raw: &sys::ScsValue) -> ValueRef<'_> {
+        // SAFETY: A shared Rust reference proves alignment, initialization of
+        // the outer `ScsValue`, and validity for the returned borrow. Each test
+        // fixture initializes the union member selected by its known tag; an
+        // unknown tag is tested only through operations that do not read it.
+        unsafe { ValueRef::from_ptr(raw) }.expect("value reference should be present")
+    }
 
     #[test]
     fn signed_64_bit_values_are_the_only_v101_representation() {
@@ -480,7 +506,7 @@ mod tests {
                 value_float: sys::ScsValueFloat { value: 12.5 },
             },
         };
-        let value = unsafe { ValueRef::from_ptr(&raw const raw) }.expect("value should be present");
+        let value = value_ref(&raw);
 
         assert_eq!(value.as_f32(), Some(12.5));
         assert_eq!(value.as_i32(), None);
@@ -496,7 +522,7 @@ mod tests {
                 value_u64: sys::ScsValueU64 { value: 0 },
             },
         };
-        let value = unsafe { ValueRef::from_ptr(&raw const raw) }.expect("value should be present");
+        let value = value_ref(&raw);
 
         assert_eq!(value.raw_type(), 99);
         assert_eq!(value.value_type(), None);
@@ -511,7 +537,7 @@ mod tests {
                 value_bool: sys::ScsValueBool { value: 1 },
             },
         };
-        let value = unsafe { ValueRef::from_ptr(&raw const raw) }.expect("value should be present");
+        let value = value_ref(&raw);
 
         assert_eq!(value.as_bool(), Some(true));
         assert_eq!(value.as_i32(), None);
@@ -571,18 +597,12 @@ mod tests {
             },
         };
 
-        let signed_32 = unsafe { ValueRef::from_ptr(&raw const signed_32) }
-            .expect("signed 32-bit value should be present");
-        let unsigned_32 = unsafe { ValueRef::from_ptr(&raw const unsigned_32) }
-            .expect("unsigned 32-bit value should be present");
-        let signed_64 = unsafe { ValueRef::from_ptr(&raw const signed_64) }
-            .expect("signed 64-bit value should be present");
-        let unsigned_64 = unsafe { ValueRef::from_ptr(&raw const unsigned_64) }
-            .expect("unsigned 64-bit value should be present");
-        let double = unsafe { ValueRef::from_ptr(&raw const double) }
-            .expect("double value should be present");
-        let string = unsafe { ValueRef::from_ptr(&raw const string) }
-            .expect("string value should be present");
+        let signed_32 = value_ref(&signed_32);
+        let unsigned_32 = value_ref(&unsigned_32);
+        let signed_64 = value_ref(&signed_64);
+        let unsigned_64 = value_ref(&unsigned_64);
+        let double = value_ref(&double);
+        let string = value_ref(&string);
 
         assert_eq!(signed_32.as_i32(), Some(-32));
         assert_eq!(unsigned_32.as_u32(), Some(32));
@@ -626,12 +646,9 @@ mod tests {
             padding: sys::ScsPadding::uninit(),
             value: sys::ScsValueData { value_euler: euler },
         };
-        let fvector = unsafe { ValueRef::from_ptr(&raw const fvector) }
-            .expect("float vector should be present");
-        let dvector = unsafe { ValueRef::from_ptr(&raw const dvector) }
-            .expect("double vector should be present");
-        let raw_euler = unsafe { ValueRef::from_ptr(&raw const raw_euler) }
-            .expect("Euler value should be present");
+        let fvector = value_ref(&fvector);
+        let dvector = value_ref(&dvector);
+        let raw_euler = value_ref(&raw_euler);
 
         assert_eq!(
             fvector.as_fvector(),
@@ -696,10 +713,8 @@ mod tests {
             },
         };
 
-        let fplacement = unsafe { ValueRef::from_ptr(&raw const fplacement) }
-            .expect("float placement should be present");
-        let dplacement = unsafe { ValueRef::from_ptr(&raw const dplacement) }
-            .expect("double placement should be present");
+        let fplacement = value_ref(&fplacement);
+        let dplacement = value_ref(&dplacement);
         assert_eq!(
             fplacement.as_fplacement(),
             Some(FPlacement {

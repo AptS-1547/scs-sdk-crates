@@ -260,25 +260,33 @@ impl InputEvent {
             return Err(SdkError::InvalidParameter);
         }
 
-        // SAFETY: The null and registered-type checks above succeeded, and the
-        // caller guarantees that `output` points to the live writable event
-        // buffer for this direct main-thread callback. `addr_of_mut!` performs
-        // raw field projection without creating a reference to the possibly
-        // partially initialized structure or union. We initialize the index
-        // and exactly the active member selected by the validated Rust value;
-        // no inactive member or future-extension byte is read or written.
-        unsafe {
-            core::ptr::addr_of_mut!((*output).input_index).write(self.index.raw());
-            match self.value {
-                InputValue::Bool(value) => {
-                    core::ptr::addr_of_mut!((*output).value.value_bool).write(sys::ScsValueBool {
+        // SAFETY: The null check above and the caller's contract establish that
+        // `output` points to a live, writable event buffer. `addr_of_mut!` only
+        // projects the field address and does not create a reference.
+        let input_index = unsafe { core::ptr::addr_of_mut!((*output).input_index) };
+        // SAFETY: `input_index` addresses the writable index field projected
+        // above, and writing it does not read any uninitialized storage.
+        unsafe { input_index.write(self.index.raw()) };
+
+        // SAFETY: The same live-buffer contract permits projecting the union's
+        // address without reading it or selecting an inactive member.
+        let output_value = unsafe { core::ptr::addr_of_mut!((*output).value) };
+        match self.value {
+            InputValue::Bool(value) => {
+                let output_bool = output_value.cast::<sys::ScsValueBool>();
+                // SAFETY: A C union's fields start at the union address. The
+                // validated bool variant selects exactly this active member.
+                unsafe {
+                    output_bool.write(sys::ScsValueBool {
                         value: u8::from(value),
                     });
-                }
-                InputValue::Float(value) => {
-                    core::ptr::addr_of_mut!((*output).value.value_float)
-                        .write(sys::ScsValueFloat { value: value.get() });
-                }
+                };
+            }
+            InputValue::Float(value) => {
+                let output_float = output_value.cast::<sys::ScsValueFloat>();
+                // SAFETY: A C union's fields start at the union address. The
+                // validated float variant selects exactly this active member.
+                unsafe { output_float.write(sys::ScsValueFloat { value: value.get() }) };
             }
         }
         Ok(())
@@ -634,10 +642,15 @@ mod tests {
     #[test]
     fn input_api_accepts_only_the_audited_v100_layout() {
         let raw = raw_api();
+        // SAFETY: The pointer addresses a live, aligned V1.00 fixture. The
+        // deliberately unsupported version is rejected before its layout is
+        // interpreted, while the backing fixture remains valid either way.
         let unsupported =
             unsafe { InputApi::from_raw(InputApiVersion::new(1, 1), (&raw const raw).cast()) };
         assert_eq!(unsupported.err(), Some(SdkError::Unsupported));
 
+        // SAFETY: `raw` is the exact initialized V1.00 structure and its
+        // strings and function table remain live for the borrowed API view.
         let api = unsafe { InputApi::from_raw(InputApiVersion::V1_00, (&raw const raw).cast()) }
             .expect("v1.00 should be supported");
         assert_eq!(api.game_version(), game::ets2::V1_00);
@@ -647,6 +660,8 @@ mod tests {
     fn registration_and_event_writing_preserve_types() {
         REGISTRATIONS.store(0, Ordering::Relaxed);
         let raw = raw_api();
+        // SAFETY: `raw` is the exact initialized V1.00 structure and remains
+        // live through registration and event writing in this test.
         let api = unsafe { InputApi::from_raw(InputApiVersion::V1_00, (&raw const raw).cast()) }
             .expect("v1.00 should be supported");
         let inputs = [InputDeviceInput::new(
@@ -654,6 +669,9 @@ mod tests {
             c"Button",
             InputValueType::Bool,
         )];
+        // SAFETY: The device and input descriptors outlive registration. The
+        // fixture callbacks have the exact ABI, never unwind, and neither
+        // callback dereferences the intentionally null context.
         let device = unsafe {
             InputDeviceRegistration::new(
                 c"device",
@@ -675,6 +693,8 @@ mod tests {
             InputIndex::new(0).expect("zero is valid"),
             InputValue::Bool(true),
         );
+        // SAFETY: `output` is aligned writable storage for one event and stays
+        // live for the call; the expected type matches the event's bool value.
         unsafe { event.write_to(output.as_mut_ptr(), InputValueType::Bool) }
             .expect("matching value type should write");
         // SAFETY: The buffer was fully initialized with zeroes before
@@ -692,10 +712,14 @@ mod tests {
         let bool_event = InputEvent::new(index, InputValue::Bool(true));
         let mut output = MaybeUninit::<sys::ScsInputEvent>::uninit();
 
+        // SAFETY: A null output is explicitly permitted as an error input and
+        // is rejected before any pointer projection or write occurs.
         let null_result =
             unsafe { bool_event.write_to(core::ptr::null_mut(), InputValueType::Bool) };
         assert_eq!(null_result, Err(SdkError::InvalidParameter));
 
+        // SAFETY: `output` is valid aligned storage, and the deliberate type
+        // mismatch is rejected before the uninitialized storage is accessed.
         let mismatch = unsafe { bool_event.write_to(output.as_mut_ptr(), InputValueType::Float) };
         assert_eq!(mismatch, Err(SdkError::InvalidParameter));
     }
@@ -722,6 +746,9 @@ mod tests {
             InputValue::Float(InputAxisValue::new(-0.625).expect("value is normalized")),
         );
 
+        // SAFETY: The byte initialization above made the complete aligned
+        // event storage writable and observable; the expected type matches the
+        // float event, so `write_to` selects only that active union member.
         unsafe { event.write_to(float_output.as_mut_ptr(), InputValueType::Float) }
             .expect("matching float value should write");
 
@@ -753,6 +780,9 @@ mod tests {
             InputValue::Bool(true),
         );
 
+        // SAFETY: The byte initialization above made the complete aligned
+        // event storage writable and observable; the expected type matches the
+        // bool event, so `write_to` selects only that active union member.
         unsafe { event.write_to(bool_output.as_mut_ptr(), InputValueType::Bool) }
             .expect("matching bool value should write");
 
@@ -799,6 +829,9 @@ mod tests {
 
     #[test]
     fn device_registration_rejects_empty_and_too_many_inputs() {
+        // SAFETY: The callback has the exact ABI and never unwinds or touches
+        // the null context. The empty input list is rejected before any
+        // registration can publish these borrowed descriptors.
         let empty = unsafe {
             InputDeviceRegistration::new(
                 c"device",
@@ -815,6 +848,9 @@ mod tests {
         let inputs: Vec<_> = (0..=InputIndex::MAX_COUNT)
             .map(|_| InputDeviceInput::new(c"button", c"Button", InputValueType::Bool))
             .collect();
+        // SAFETY: The callback/context contract matches the empty case, and
+        // the oversized list is rejected before its borrowed storage can be
+        // published to SCS.
         let too_many = unsafe {
             InputDeviceRegistration::new(
                 c"device",
