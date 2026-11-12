@@ -1,4 +1,4 @@
-//! End-to-end ETS2 telemetry example built on the safe plugin framework.
+//! End-to-end ETS2 and ATS telemetry example built on the safe plugin framework.
 //!
 //! This crate intentionally contains only product-owned state and behavior:
 //! which channels are interesting, how a snapshot is accumulated, and what is
@@ -40,14 +40,21 @@ const METRES_PER_SECOND_TO_KILOMETRES_PER_HOUR: f32 = 3.6;
 
 /// Compatibility requirements derived from capabilities used by this example.
 ///
-/// Gameplay callbacks require Telemetry API 1.01. ETS2 schema 1.14 is the first
-/// version documented by SCS with gameplay-event support; the navigation
-/// channels used below arrived earlier in schema 1.12. Later schema minors are
-/// compatible additions and are accepted within major version 1.
-static SUPPORTED_GAMES: [GameCompatibility; 1] = [GameCompatibility::new(
-    Game::EuroTruckSimulator2,
-    game::ets2::V1_14,
-)];
+/// Gameplay callbacks require Telemetry API 1.01. ETS2 schema 1.14 and ATS
+/// schema 1.01 are the first versions documented by SCS with gameplay-event
+/// support; the navigation channels used below arrived earlier (ETS2 1.12,
+/// ATS 1.00). Later schema minors are compatible additions and are accepted
+/// within major version 1.
+///
+/// ATS was audited before being listed here: every subscribed channel exists
+/// in ATS, the example uses no `AdBlue` channel (which ATS does not provide),
+/// distances and speeds are SI in both games, and money values are logged
+/// verbatim in the game's native currency (EUR for ETS2, USD for ATS) without
+/// conversion.
+static SUPPORTED_GAMES: [GameCompatibility; 2] = [
+    GameCompatibility::new(Game::EuroTruckSimulator2, game::ets2::V1_14),
+    GameCompatibility::new(Game::AmericanTruckSimulator, game::ats::V1_01),
+];
 
 /// Last values received from the selected telemetry channels.
 ///
@@ -64,6 +71,35 @@ struct Snapshot {
     navigation_time_seconds: f32,
     navigation_speed_limit_metres_per_second: f32,
     cargo_damage: f32,
+    /// In-game minutes until the next mandatory break (SDK 1.16).
+    ///
+    /// `None` until SCS delivers a value: the channel is optional, older
+    /// schemas do not provide it, and the game may omit it when the mandatory
+    /// break simulation is disabled. A fabricated zero would look like an
+    /// authoritative "break due now".
+    next_mandatory_break_minutes: Option<i32>,
+}
+
+/// Renders a value SCS may omit, printing `n/a` when it was not sent.
+///
+/// Real games do omit documented attributes: ATS 1.62 sends no `earned.xp`
+/// with `car_job.delivered`. Printing a type default such as `0` would look
+/// like an authoritative value, so absence stays visible in the log.
+fn shown<T: core::fmt::Display>(value: Option<T>) -> String {
+    value.map_or_else(|| String::from("n/a"), |value| value.to_string())
+}
+
+/// Appends a unit to a rendered value, leaving `n/a` without a unit.
+fn with_unit(text: String, unit: &str) -> String {
+    if text == "n/a" { text } else { text + unit }
+}
+
+/// Like [`shown`], with a fixed number of decimals for floating-point values.
+fn shown_fixed(value: Option<f32>, decimals: usize) -> String {
+    value.map_or_else(
+        || String::from("n/a"),
+        |value| format!("{value:.decimals$}"),
+    )
 }
 
 /// Product-owned plugin state.
@@ -115,6 +151,8 @@ impl TelemetryExample {
             self.snapshot.navigation_speed_limit_metres_per_second = value;
         } else if let Some(value) = update.value(channels::job::CARGO_DAMAGE) {
             self.snapshot.cargo_damage = value;
+        } else if let Some(value) = update.value(channels::common::NEXT_MANDATORY_BREAK) {
+            self.snapshot.next_mandatory_break_minutes = Some(value);
         }
     }
 
@@ -152,13 +190,17 @@ impl TelemetryExample {
         } else {
             String::from("n/a")
         };
+        let mandatory_break_text = self
+            .snapshot
+            .next_mandatory_break_minutes
+            .map_or_else(|| String::from("n/a"), |minutes| format!("{minutes}min"));
 
         context.message(format_args!(
             concat!(
                 "[scs-sdk-example] probe speed={:.1}km/h rpm={:.0} gear={} ",
                 "position=({:.3},{:.3},{:.3}) heading={:.4} ",
                 "navigation_distance={:.2}km navigation_time={:.0}s ",
-                "speed_limit={} cargo_damage={:.3}"
+                "speed_limit={} cargo_damage={:.3} mandatory_break={}"
             ),
             speed_kmh,
             self.snapshot.engine_rpm,
@@ -171,6 +213,7 @@ impl TelemetryExample {
             self.snapshot.navigation_time_seconds,
             speed_limit_text,
             self.snapshot.cargo_damage,
+            mandatory_break_text,
         ));
     }
 
@@ -187,91 +230,144 @@ impl TelemetryExample {
             return;
         }
 
-        let cargo_name = configuration_event
-            .string_owned(configuration::attributes::CARGO)
-            .unwrap_or_default();
-        let cargo_id = configuration_event
-            .string_owned(configuration::attributes::CARGO_ID)
-            .unwrap_or_default();
-        let source_city = configuration_event
-            .string_owned(configuration::attributes::SOURCE_CITY)
-            .unwrap_or_default();
-        let source_city_id = configuration_event
-            .string_owned(configuration::attributes::SOURCE_CITY_ID)
-            .unwrap_or_default();
-        let source_company = configuration_event
-            .string_owned(configuration::attributes::SOURCE_COMPANY)
-            .unwrap_or_default();
-        let source_company_id = configuration_event
-            .string_owned(configuration::attributes::SOURCE_COMPANY_ID)
-            .unwrap_or_default();
-        let destination_city = configuration_event
-            .string_owned(configuration::attributes::DESTINATION_CITY)
-            .unwrap_or_default();
-        let destination_city_id = configuration_event
-            .string_owned(configuration::attributes::DESTINATION_CITY_ID)
-            .unwrap_or_default();
-        let destination_company = configuration_event
-            .string_owned(configuration::attributes::DESTINATION_COMPANY)
-            .unwrap_or_default();
-        let destination_company_id = configuration_event
-            .string_owned(configuration::attributes::DESTINATION_COMPANY_ID)
-            .unwrap_or_default();
+        let cargo_name = configuration_event.string_owned(configuration::attributes::CARGO);
+        let cargo_id = configuration_event.string_owned(configuration::attributes::CARGO_ID);
+        let source_city = configuration_event.string_owned(configuration::attributes::SOURCE_CITY);
+        let source_city_id =
+            configuration_event.string_owned(configuration::attributes::SOURCE_CITY_ID);
+        let source_company =
+            configuration_event.string_owned(configuration::attributes::SOURCE_COMPANY);
+        let source_company_id =
+            configuration_event.string_owned(configuration::attributes::SOURCE_COMPANY_ID);
+        let destination_city =
+            configuration_event.string_owned(configuration::attributes::DESTINATION_CITY);
+        let destination_city_id =
+            configuration_event.string_owned(configuration::attributes::DESTINATION_CITY_ID);
+        let destination_company =
+            configuration_event.string_owned(configuration::attributes::DESTINATION_COMPANY);
+        let destination_company_id =
+            configuration_event.string_owned(configuration::attributes::DESTINATION_COMPANY_ID);
         // Keep both views deliberately. `job_market` gives application logic a
-        // closed, typed SDK 1.14 value, while the generic string accessor keeps
+        // closed, typed SDK 1.16 value, while the generic string accessor keeps
         // a future additive market visible in diagnostics instead of erasing it
         // merely because this build predates that value.
-        let market_raw = configuration_event
-            .string_owned(configuration::attributes::JOB_MARKET)
-            .unwrap_or_default();
+        let market_raw = configuration_event.string_owned(configuration::attributes::JOB_MARKET);
         let market_known = configuration_event.job_market();
 
-        let mass = configuration_event
-            .get(configuration::attributes::CARGO_MASS)
-            .unwrap_or_default();
-        let income = configuration_event
-            .get(configuration::attributes::INCOME)
-            .unwrap_or_default();
-        let planned_distance = configuration_event
-            .get(configuration::attributes::PLANNED_DISTANCE_KM)
-            .unwrap_or_default();
-        let delivery_time = configuration_event
-            .get(configuration::attributes::DELIVERY_TIME)
-            .unwrap_or_default();
-        let cargo_loaded = configuration_event
-            .get(configuration::attributes::IS_CARGO_LOADED)
-            .unwrap_or_default();
-        let special_job = configuration_event
-            .get(configuration::attributes::SPECIAL_JOB)
-            .unwrap_or_default();
+        let mass = configuration_event.get(configuration::attributes::CARGO_MASS);
+        let income = configuration_event.get(configuration::attributes::INCOME);
+        let planned_distance =
+            configuration_event.get(configuration::attributes::PLANNED_DISTANCE_KM);
+        let delivery_time = configuration_event.get(configuration::attributes::DELIVERY_TIME);
+        let cargo_loaded = configuration_event.get(configuration::attributes::IS_CARGO_LOADED);
+        let special_job = configuration_event.get(configuration::attributes::SPECIAL_JOB);
 
         context.message(format_args!(
             concat!(
-                "[scs-sdk-example] job cargo={} cargo_id={} mass={:.0}kg ",
+                "[scs-sdk-example] job cargo={} cargo_id={} mass={} ",
                 "source={}({})/{}({}) destination={}({})/{}({}) ",
                 "market_raw={} market_known={:?} ",
-                "income={} planned_distance={}km delivery_time={} ",
+                "income={} planned_distance={} delivery_time={} ",
                 "cargo_loaded={} special_job={}"
             ),
-            cargo_name,
-            cargo_id,
-            mass,
-            source_city,
-            source_city_id,
-            source_company,
-            source_company_id,
-            destination_city,
-            destination_city_id,
-            destination_company,
-            destination_company_id,
-            market_raw,
+            shown(cargo_name),
+            shown(cargo_id),
+            with_unit(shown_fixed(mass, 0), "kg"),
+            shown(source_city),
+            shown(source_city_id),
+            shown(source_company),
+            shown(source_company_id),
+            shown(destination_city),
+            shown(destination_city_id),
+            shown(destination_company),
+            shown(destination_company_id),
+            shown(market_raw),
             market_known,
-            income,
-            planned_distance,
-            delivery_time,
-            cargo_loaded,
-            special_job,
+            shown(income),
+            with_unit(shown(planned_distance), "km"),
+            shown(delivery_time),
+            shown(cargo_loaded),
+            shown(special_job),
         ));
+    }
+
+    /// Logs the SDK 1.16 car-job configuration (ATS schema 1.07 and later).
+    ///
+    /// Car jobs report a unit count and customer priorities instead of the
+    /// cargo-market fields of a classic job. As with `job.market`, both the raw
+    /// `car_job.market` string and the typed known value are retained.
+    fn log_car_job_configuration(
+        context: &PluginContext<'_>,
+        configuration_event: ConfigurationEvent<'_>,
+    ) {
+        if !configuration_event.has_attributes() {
+            context.message(format_args!("[scs-sdk-example] no active car job"));
+            return;
+        }
+
+        let text = |attribute| configuration_event.string_owned(attribute);
+        let cargo_name = text(configuration::attributes::CARGO);
+        let cargo_id = text(configuration::attributes::CARGO_ID);
+        let source_city_id = text(configuration::attributes::SOURCE_CITY_ID);
+        let source_company_id = text(configuration::attributes::SOURCE_COMPANY_ID);
+        let destination_city_id = text(configuration::attributes::DESTINATION_CITY_ID);
+        let destination_company_id = text(configuration::attributes::DESTINATION_COMPANY_ID);
+        let market_raw = text(configuration::attributes::CAR_JOB_MARKET);
+        let market_known = configuration_event.car_job_market();
+
+        let unit_count = configuration_event.get(configuration::attributes::CARGO_UNIT_COUNT);
+        let income = configuration_event.get(configuration::attributes::INCOME);
+        let planned_distance =
+            configuration_event.get(configuration::attributes::PLANNED_DISTANCE_KM);
+        let delivery_time = configuration_event.get(configuration::attributes::DELIVERY_TIME);
+        let prio_cargo =
+            configuration_event.get(configuration::attributes::CUSTOMER_PRIO_CARGO_HANDLING);
+        let prio_time = configuration_event.get(configuration::attributes::CUSTOMER_PRIO_TIME);
+        let prio_vehicle =
+            configuration_event.get(configuration::attributes::CUSTOMER_PRIO_VEHICLE_APPEARANCE);
+
+        context.message(format_args!(
+            concat!(
+                "[scs-sdk-example] car job cargo={} cargo_id={} units={} ",
+                "source={}/{} destination={}/{} ",
+                "market_raw={} market_known={:?} ",
+                "income={} planned_distance={} delivery_time={} ",
+                "prio_cargo={} prio_time={} prio_vehicle={}"
+            ),
+            shown(cargo_name),
+            shown(cargo_id),
+            shown(unit_count),
+            shown(source_city_id),
+            shown(source_company_id),
+            shown(destination_city_id),
+            shown(destination_company_id),
+            shown(market_raw),
+            market_known,
+            shown(income),
+            with_unit(shown(planned_distance), "km"),
+            shown(delivery_time),
+            shown(prio_cargo),
+            shown(prio_time),
+            shown(prio_vehicle),
+        ));
+    }
+
+    /// Logs the job-related configuration groups the example understands.
+    ///
+    /// SDK 1.16 documents no bus-job attributes yet (SCS will document them
+    /// with the bus DLC), so a `bus_job` configuration only reports whether
+    /// the game sent any attributes at all.
+    fn log_configuration(context: &PluginContext<'_>, configuration_event: ConfigurationEvent<'_>) {
+        if configuration_event.is(configuration::ids::JOB) {
+            Self::log_job_configuration(context, configuration_event);
+        } else if configuration_event.is(configuration::ids::CAR_JOB) {
+            Self::log_car_job_configuration(context, configuration_event);
+        } else if configuration_event.is(configuration::ids::BUS_JOB) {
+            context.message(format_args!(
+                "[scs-sdk-example] bus job configuration has_attributes={}",
+                configuration_event.has_attributes()
+            ));
+        }
     }
 
     /// Logs a paid ferry or train journey with the complete SDK payload.
@@ -284,32 +380,27 @@ impl TelemetryExample {
         event: GameplayEvent<'_>,
         transport: &'static str,
     ) {
-        let amount = event
-            .get(gameplay::attributes::PAY_AMOUNT)
-            .unwrap_or_default();
-        let source_name = event
-            .string_owned(gameplay::attributes::SOURCE_NAME)
-            .unwrap_or_default();
-        let source_id = event
-            .string_owned(gameplay::attributes::SOURCE_ID)
-            .unwrap_or_default();
-        let target_name = event
-            .string_owned(gameplay::attributes::TARGET_NAME)
-            .unwrap_or_default();
-        let target_id = event
-            .string_owned(gameplay::attributes::TARGET_ID)
-            .unwrap_or_default();
+        let amount = event.get(gameplay::attributes::PAY_AMOUNT);
+        let source_name = event.string_owned(gameplay::attributes::SOURCE_NAME);
+        let source_id = event.string_owned(gameplay::attributes::SOURCE_ID);
+        let target_name = event.string_owned(gameplay::attributes::TARGET_NAME);
+        let target_id = event.string_owned(gameplay::attributes::TARGET_ID);
 
         context.message(format_args!(
             concat!(
                 "[scs-sdk-example] {} used amount={} ",
                 "source={}({}) target={}({})"
             ),
-            transport, amount, source_name, source_id, target_name, target_id,
+            transport,
+            shown(amount),
+            shown(source_name),
+            shown(source_id),
+            shown(target_name),
+            shown(target_id),
         ));
     }
 
-    /// Logs all six gameplay events defined by the SDK 1.14 header.
+    /// Logs all eight gameplay events defined by the SDK 1.16 header.
     ///
     /// The example keeps every branch explicit even though SCS delivers them
     /// through one generic gameplay callback. Besides making the application
@@ -317,71 +408,82 @@ impl TelemetryExample {
     /// every official payload shape.
     fn log_gameplay(context: &PluginContext<'_>, event: GameplayEvent<'_>) {
         if event.is(gameplay::events::JOB_DELIVERED) {
-            let revenue = event.get(gameplay::attributes::REVENUE).unwrap_or_default();
-            let earned_xp = event
-                .get(gameplay::attributes::EARNED_XP)
-                .unwrap_or_default();
-            let cargo_damage = event
-                .get(gameplay::attributes::CARGO_DAMAGE)
-                .unwrap_or_default();
-            let distance_km = event
-                .get(gameplay::attributes::DISTANCE_KM)
-                .unwrap_or_default();
-            let delivery_time = event
-                .get(gameplay::attributes::DELIVERY_TIME)
-                .unwrap_or_default();
-            let auto_park_used = event
-                .get(gameplay::attributes::AUTO_PARK_USED)
-                .unwrap_or_default();
-            let auto_load_used = event
-                .get(gameplay::attributes::AUTO_LOAD_USED)
-                .unwrap_or_default();
+            let revenue = event.get(gameplay::attributes::REVENUE);
+            let earned_xp = event.get(gameplay::attributes::EARNED_XP);
+            let cargo_damage = event.get(gameplay::attributes::CARGO_DAMAGE);
+            let distance_km = event.get(gameplay::attributes::DISTANCE_KM);
+            let delivery_time = event.get(gameplay::attributes::DELIVERY_TIME);
+            let auto_park_used = event.get(gameplay::attributes::AUTO_PARK_USED);
+            let auto_load_used = event.get(gameplay::attributes::AUTO_LOAD_USED);
 
             context.message(format_args!(
                 concat!(
                     "[scs-sdk-example] job delivered revenue={} xp={} ",
-                    "cargo_damage={:.3} distance={:.1}km delivery_time={}min ",
+                    "cargo_damage={} distance={} delivery_time={} ",
                     "auto_park={} auto_load={}"
                 ),
-                revenue,
-                earned_xp,
-                cargo_damage,
-                distance_km,
-                delivery_time,
-                auto_park_used,
-                auto_load_used,
+                shown(revenue),
+                shown(earned_xp),
+                shown_fixed(cargo_damage, 3),
+                with_unit(shown_fixed(distance_km, 1), "km"),
+                with_unit(shown(delivery_time), "min"),
+                shown(auto_park_used),
+                shown(auto_load_used),
+            ));
+        } else if event.is(gameplay::events::CAR_JOB_DELIVERED) {
+            let revenue = event.get(gameplay::attributes::REVENUE);
+            let earned_xp = event.get(gameplay::attributes::EARNED_XP);
+            let cargo_damage = event.get(gameplay::attributes::CARGO_DAMAGE);
+            let vehicle_damage = event.get(gameplay::attributes::VEHICLE_DAMAGE);
+            let distance_km = event.get(gameplay::attributes::DISTANCE_KM);
+            let delivery_time = event.get(gameplay::attributes::DELIVERY_TIME);
+
+            context.message(format_args!(
+                concat!(
+                    "[scs-sdk-example] car job delivered revenue={} xp={} ",
+                    "cargo_damage={} vehicle_damage={} ",
+                    "distance={} delivery_time={}"
+                ),
+                shown(revenue),
+                shown(earned_xp),
+                shown_fixed(cargo_damage, 3),
+                shown_fixed(vehicle_damage, 3),
+                with_unit(shown_fixed(distance_km, 1), "km"),
+                with_unit(shown(delivery_time), "min"),
             ));
         } else if event.is(gameplay::events::JOB_CANCELLED) {
-            let penalty = event
-                .get(gameplay::attributes::CANCEL_PENALTY)
-                .unwrap_or_default();
+            let penalty = event.get(gameplay::attributes::CANCEL_PENALTY);
             context.message(format_args!(
-                "[scs-sdk-example] job cancelled penalty={penalty}"
+                "[scs-sdk-example] job cancelled penalty={}",
+                shown(penalty)
+            ));
+        } else if event.is(gameplay::events::CAR_JOB_CANCELLED) {
+            let penalty = event.get(gameplay::attributes::CANCEL_PENALTY);
+            context.message(format_args!(
+                "[scs-sdk-example] car job cancelled penalty={}",
+                shown(penalty)
             ));
         } else if event.is(gameplay::events::PLAYER_FINED) {
             // As with job markets, retain the original SDK string beside the
             // typed value so a newer game can add an offence without making an
             // older plugin print a misleading known classification.
-            let offence_raw = event
-                .string_owned(gameplay::attributes::FINE_OFFENCE)
-                .unwrap_or_default();
+            let offence_raw = event.string_owned(gameplay::attributes::FINE_OFFENCE);
             let offence_known = event.fine_offence();
-            let amount = event
-                .get(gameplay::attributes::FINE_AMOUNT)
-                .unwrap_or_default();
+            let amount = event.get(gameplay::attributes::FINE_AMOUNT);
             context.message(format_args!(
                 concat!(
                     "[scs-sdk-example] player fined offence_raw={} ",
                     "offence_known={:?} amount={}"
                 ),
-                offence_raw, offence_known, amount,
+                shown(offence_raw),
+                offence_known,
+                shown(amount),
             ));
         } else if event.is(gameplay::events::PLAYER_TOLLGATE_PAID) {
-            let amount = event
-                .get(gameplay::attributes::PAY_AMOUNT)
-                .unwrap_or_default();
+            let amount = event.get(gameplay::attributes::PAY_AMOUNT);
             context.message(format_args!(
-                "[scs-sdk-example] tollgate paid amount={amount}"
+                "[scs-sdk-example] tollgate paid amount={}",
+                shown(amount)
             ));
         } else if event.is(gameplay::events::PLAYER_USE_FERRY) {
             Self::log_paid_transport(context, event, "ferry");
@@ -426,6 +528,11 @@ impl TelemetryPlugin for TelemetryExample {
         context.subscribe(channels::truck::NAVIGATION_TIME)?;
         context.subscribe(channels::truck::NAVIGATION_SPEED_LIMIT)?;
         context.subscribe(channels::job::CARGO_DAMAGE)?;
+        // SDK 1.16 channel, subscribed as optional: schemas before ETS2 1.19 /
+        // ATS 1.06 do not declare it, and the framework skips it there instead
+        // of rejecting the whole plugin. SCS only started delivering values in
+        // ETS2 1.21 / ATS 1.08, so the snapshot keeps `None` until it arrives.
+        context.subscribe_optional(channels::common::NEXT_MANDATORY_BREAK)?;
 
         context.message(format_args!("[scs-sdk-example] example state initialized"));
         Ok(())
@@ -455,7 +562,7 @@ impl TelemetryPlugin for TelemetryExample {
                 context.message(format_args!("[scs-sdk-example] telemetry started"));
             }
             TelemetryEvent::Configuration(configuration_event) => {
-                Self::log_job_configuration(context, configuration_event);
+                Self::log_configuration(context, configuration_event);
             }
             TelemetryEvent::Gameplay(gameplay_event) => {
                 Self::log_gameplay(context, gameplay_event);
@@ -470,3 +577,20 @@ impl TelemetryPlugin for TelemetryExample {
 }
 
 export_plugin!(TelemetryExample::default());
+
+#[cfg(test)]
+mod tests {
+    use super::{shown, shown_fixed, with_unit};
+
+    #[test]
+    fn absent_sdk_values_render_as_n_a_without_units() {
+        // ATS 1.62 omits `earned.xp` from `car_job.delivered`; it must not
+        // appear as an authoritative zero.
+        assert_eq!(shown::<i32>(None), "n/a");
+        assert_eq!(shown(Some(0_i32)), "0");
+        assert_eq!(shown_fixed(None, 3), "n/a");
+        assert_eq!(shown_fixed(Some(0.009), 3), "0.009");
+        assert_eq!(with_unit(shown_fixed(Some(115.0), 1), "km"), "115.0km");
+        assert_eq!(with_unit(shown::<u32>(None), "km"), "n/a");
+    }
+}

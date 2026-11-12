@@ -17,7 +17,7 @@ license_files=(
 )
 
 # The historical archive series contains two distinct original copyright
-# notices: SDK 1.0-1.5 use the 2013 notice, while SDK 1.6-1.14 use the 2016
+# notices: SDK 1.0-1.5 use the 2013 notice, while SDK 1.6-1.16 use the 2016
 # notice. Preserve both exact texts instead of silently replacing the notice
 # attached to the earlier headers used for schema-history research.
 if ! cmp -s \
@@ -29,8 +29,8 @@ fi
 
 if ! cmp -s \
   "$repo_root/third-party/scs_sdk_history/licenses/LICENSE-SCS-SDK-2016" \
-  "$repo_root/third-party/scs_sdk_1_14/sdk_license.txt"; then
-  printf '%s\n' 'The preserved 2016 notice does not match the vendored SDK 1.14 license.' >&2
+  "$repo_root/third-party/scs_sdk_1_16/sdk_license.txt"; then
+  printf '%s\n' 'The preserved 2016 notice does not match the vendored SDK 1.16 license.' >&2
   exit 1
 fi
 

@@ -2,12 +2,12 @@
 
 **简体中文** | [English](README.md)
 
-本仓库的 typed descriptor availability 元数据来源于官方 SCS SDK 1.0 到 1.14
+本仓库的 typed descriptor availability 元数据来源于官方 SCS SDK 1.0 到 1.16
 压缩包。历史 header 用于确认每个 descriptor、association 或文档化 enum-like value
 第一次出现时对应的 per-game telemetry schema。
 
 解压后的历史压缩包是研究输入，不是构建依赖。当前 ABI 与常量的权威来源仍是
-[`../scs_sdk_1_14/`](../scs_sdk_1_14/)。
+[`../scs_sdk_1_16/`](../scs_sdk_1_16/)。
 
 ## 许可证历史
 
@@ -17,10 +17,10 @@
 | SDK 压缩包 | 版权声明 | 保留文本 |
 | --- | --- | --- |
 | 1.0 到 1.5 | `Copyright (C) 2013 SCS Software` | [`licenses/LICENSE-SCS-SDK-2013`](licenses/LICENSE-SCS-SDK-2013) |
-| 1.6 到 1.14 | `Copyright (C) 2016 SCS Software` | [`licenses/LICENSE-SCS-SDK-2016`](licenses/LICENSE-SCS-SDK-2016) |
+| 1.6 到 1.16 | `Copyright (C) 2016 SCS Software` | [`licenses/LICENSE-SCS-SDK-2016`](licenses/LICENSE-SCS-SDK-2016) |
 
 每个公共 Rust crate 都会同时分发两份原始声明，因为其 schema-history 元数据可以追溯到
-完整的 1.0 到 1.14 压缩包系列。两份文本只有版权年份不同；同时保留二者可以避免用
+完整的 1.0 到 1.16 压缩包系列。两份文本只有版权年份不同；同时保留二者可以避免用
 新版声明静默替换早期 SDK header 随附的声明。
 
 ## 官方压缩包清单
@@ -45,6 +45,8 @@
 | 1.12 | <https://download.eurotrucksimulator2.com/scs_sdk_1_12.zip> | `2afb46c1c946b39a5ea16e043d4b95eef90911a2c0399ab9c0ae73326d0a6076` |
 | 1.13 | <https://download.eurotrucksimulator2.com/scs_sdk_1_13.zip> | `fd4a0baac5f94f4a2a2167067f68aeaaf0fe54daa597bdb9ae91b2934c5ed6a6` |
 | 1.14 | <https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip> | `c6c1f7376b7324994d9f9c567f3c4141fbbf305b6bf803bc4cfeef2437b2023a` |
+| 1.15 | <https://download.eurotrucksimulator2.com/scs_sdk_1_15.zip> | `77504f14d2ac1405ba70ee3a97351662adbb39c0cf9d3a085423f01d37bc28ec` |
+| 1.16 | <https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip> | `49821e25568f4d7e462135f577f8fef2ab197326404f2c1daef139b8f3dc5e69` |
 
 压缩包版本既不是 Telemetry API version，也不是游戏 telemetry schema version。
 此清单只记录来源追踪；兼容性元数据继续使用 `scs-sdk` 实现的独立强版本域。

@@ -3,13 +3,13 @@
 [简体中文](README.zh.md) | **English**
 
 The typed descriptor availability metadata in this repository was derived from
-the official SCS SDK archives from version 1.0 through 1.14. The historical
+the official SCS SDK archives from version 1.0 through 1.16. The historical
 headers were used as evidence for the first per-game telemetry schema which
 contained each descriptor, association, or documented enum-like value.
 
 The extracted archives are research inputs rather than build dependencies. The
 current ABI and constant source of truth remains
-[`../scs_sdk_1_14/`](../scs_sdk_1_14/).
+[`../scs_sdk_1_16/`](../scs_sdk_1_16/).
 
 ## License history
 
@@ -19,10 +19,10 @@ SCS Software copyright notice has two distinct forms:
 | SDK archives | Copyright notice | Preserved text |
 | --- | --- | --- |
 | 1.0 through 1.5 | `Copyright (C) 2013 SCS Software` | [`licenses/LICENSE-SCS-SDK-2013`](licenses/LICENSE-SCS-SDK-2013) |
-| 1.6 through 1.14 | `Copyright (C) 2016 SCS Software` | [`licenses/LICENSE-SCS-SDK-2016`](licenses/LICENSE-SCS-SDK-2016) |
+| 1.6 through 1.16 | `Copyright (C) 2016 SCS Software` | [`licenses/LICENSE-SCS-SDK-2016`](licenses/LICENSE-SCS-SDK-2016) |
 
 Both original notices are distributed with every public Rust crate because its
-schema-history metadata can be traced across the complete 1.0 through 1.14
+schema-history metadata can be traced across the complete 1.0 through 1.16
 archive series. The two texts differ only in the copyright year; retaining both
 avoids silently replacing the notice attached to the earlier SDK archives.
 
@@ -48,6 +48,8 @@ audit. Each URL follows SCS Software's official download naming convention.
 | 1.12 | <https://download.eurotrucksimulator2.com/scs_sdk_1_12.zip> | `2afb46c1c946b39a5ea16e043d4b95eef90911a2c0399ab9c0ae73326d0a6076` |
 | 1.13 | <https://download.eurotrucksimulator2.com/scs_sdk_1_13.zip> | `fd4a0baac5f94f4a2a2167067f68aeaaf0fe54daa597bdb9ae91b2934c5ed6a6` |
 | 1.14 | <https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip> | `c6c1f7376b7324994d9f9c567f3c4141fbbf305b6bf803bc4cfeef2437b2023a` |
+| 1.15 | <https://download.eurotrucksimulator2.com/scs_sdk_1_15.zip> | `77504f14d2ac1405ba70ee3a97351662adbb39c0cf9d3a085423f01d37bc28ec` |
+| 1.16 | <https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip> | `49821e25568f4d7e462135f577f8fef2ab197326404f2c1daef139b8f3dc5e69` |
 
 The archive version is not a Telemetry API version or a game telemetry schema
 version. This inventory records source provenance only; compatibility metadata

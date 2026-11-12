@@ -54,9 +54,18 @@ pub mod ets2 {
     pub const VERSION_1_17: u32 = make_version(1, 17);
     /// Added multiplayer time offset and corrected trailer wear channels.
     pub const VERSION_1_18: u32 = make_version(1, 18);
+    /// Declared the mandatory-break channel (game patch 1.60).
+    ///
+    /// SCS documents that this schema did not actually provide the channel;
+    /// the delivery fix arrived in [`VERSION_1_21`].
+    pub const VERSION_1_19: u32 = make_version(1, 19);
+    /// Added bus-job related configurations (game patch 1.61).
+    pub const VERSION_1_20: u32 = make_version(1, 20);
+    /// Fixed delivery of the mandatory-break channel (game patch 1.61).
+    pub const VERSION_1_21: u32 = make_version(1, 21);
 
-    /// Latest ETS2 telemetry game version declared by SDK 1.14.
-    pub const VERSION_CURRENT: u32 = VERSION_1_18;
+    /// Latest ETS2 telemetry game version declared by SDK 1.16.
+    pub const VERSION_CURRENT: u32 = VERSION_1_21;
 }
 
 /// American Truck Simulator telemetry metadata.
@@ -82,18 +91,36 @@ pub mod ats {
     pub const VERSION_1_04: u32 = make_version(1, 4);
     /// Added multiplayer time offset and corrected trailer wear channels.
     pub const VERSION_1_05: u32 = make_version(1, 5);
+    /// Declared the mandatory-break channel (game patch 1.60).
+    ///
+    /// SCS documents that this schema did not actually provide the channel;
+    /// the delivery fix arrived in [`VERSION_1_08`].
+    pub const VERSION_1_06: u32 = make_version(1, 6);
+    /// Added car-job related configurations and gameplay events (game patch 1.61).
+    pub const VERSION_1_07: u32 = make_version(1, 7);
+    /// Fixed delivery of the mandatory-break channel (game patch 1.61).
+    pub const VERSION_1_08: u32 = make_version(1, 8);
 
-    /// Latest ATS telemetry game version declared by SDK 1.14.
-    pub const VERSION_CURRENT: u32 = VERSION_1_05;
+    /// Latest ATS telemetry game version declared by SDK 1.16.
+    pub const VERSION_CURRENT: u32 = VERSION_1_08;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::make_version;
 
     #[test]
     fn module_game_ids_alias_the_header_shaped_constants() {
         assert_eq!(ets2::GAME_ID, crate::SCS_GAME_ID_EUT2);
         assert_eq!(ats::GAME_ID, crate::SCS_GAME_ID_ATS);
+    }
+
+    #[test]
+    fn current_versions_match_the_sdk_1_16_headers() {
+        assert_eq!(ets2::VERSION_1_21, make_version(1, 21));
+        assert_eq!(ets2::VERSION_CURRENT, ets2::VERSION_1_21);
+        assert_eq!(ats::VERSION_1_08, make_version(1, 8));
+        assert_eq!(ats::VERSION_CURRENT, ats::VERSION_1_08);
     }
 }

@@ -36,8 +36,9 @@ and a real ETS2 end-to-end probe of the framework boundary.
 - Plugin metadata remains explicit and generic: SCS SDK Telemetry Example. Do not
   reintroduce ETS2 Dispatch product names, filenames, or log prefixes.
 - Declare PluginCompatibility explicitly. This example requires Telemetry API
-  1.01 for gameplay events and ETS2 schema 1.14 for documented gameplay support;
-  keep those requirements synchronized with its subscriptions.
+  1.01 for gameplay events and ETS2 schema 1.14 / ATS schema 1.01 for
+  documented gameplay support; keep those requirements synchronized with its
+  subscriptions.
 - Use the [scs-sdk-example] prefix for example-owned messages. Framework lifecycle
   identity remains under [scs-sdk-plugin].
 - Declare every event and channel subscription in initialize. Removing a line
@@ -45,8 +46,10 @@ and a real ETS2 end-to-end probe of the framework boundary.
 - Use `SdkIndex` for SDK array slots and `TrailerIndex` for numbered trailer
   namespaces. Do not pass a bare `u32` as an SDK or trailer index, and do not
   treat legacy `trailer` configuration callbacks as if they were `trailer.0`.
-- Keep the current registration surface intentional: 6 event kinds and 8 channels
-  unless an E2E coverage change justifies and documents a new count.
+- Keep the current registration surface intentional: 6 event kinds, 8 required
+  channels, and the optional SDK 1.16 `mandatory.break` channel (9 committed on
+  ETS2 1.19+ / ATS 1.06+, 8 on older schemas) unless an E2E coverage change
+  justifies and documents a new count.
 - Preserve the distinction between latest channel values and frame-end snapshot
   logging. Do not assume SCS callback ordering that the SDK does not guarantee.
 - Preserve units in names and conversion constants. SDK speed is metres per second;
@@ -59,9 +62,11 @@ and a real ETS2 end-to-end probe of the framework boundary.
   anchor.
 - Handle missing, unknown, or temporarily unavailable navigation and job values
   without panicking. Do not fabricate product defaults that look authoritative.
-- The current example intentionally accepts ETS2 and reports other games as
-  unsupported. If ATS support is added, audit semantic assumptions and E2E it
-  rather than merely deleting the game check.
+- The example accepts ETS2 and ATS and reports other games as unsupported. ATS
+  was added after a semantic audit (no AdBlue channel, SI units in both games,
+  money logged in the game's native currency) and must be E2E-validated in a
+  real ATS process, including the ATS-only car-job configuration and gameplay
+  events, before an ATS support claim is released.
 - Reset product state on initialize and shutdown so reinitialization cannot leak a
   previous game session's snapshot.
 
@@ -88,5 +93,5 @@ After changes, run at minimum:
 For behavior, subscription, export, package, or artifact changes, build and verify
 the Windows DLL, Linux shared object, and macOS dylib. For an actual installation
 change, inspect the current live game.log.txt and confirm the new library name,
-plugin metadata, [scs-sdk-example] prefix, 6/8 registration counts, clean shutdown,
+plugin metadata, [scs-sdk-example] prefix, 6/9 registration counts, clean shutdown,
 and absence of the legacy plugin.

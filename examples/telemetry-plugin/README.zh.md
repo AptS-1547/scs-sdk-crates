@@ -43,16 +43,24 @@ application 不声明 ABI 函数，不检查裸指针，不使用 C 字符串，
 | --- | ---: | --- |
 | Telemetry API | 1.01 | Gameplay event 与 signed 64-bit gameplay value 需要 API 1.01。 |
 | ETS2 telemetry schema | 1.14 | SCS 在这个游戏 schema 中引入 gameplay event descriptor。 |
-| 游戏 | Euro Truck Simulator 2 | 当前 compatibility declaration 显式列出 ETS2。 |
+| ATS telemetry schema | 1.01 | ATS schema 历史中对应的 gameplay event 引入版本。 |
+| 游戏 | Euro Truck Simulator 2、American Truck Simulator | compatibility declaration 显式列出两款游戏。 |
+
+加入 ATS 之前已完成语义审计：所有订阅的 channel 在 ATS 中都存在；示例不使用 ATS
+不提供的 `AdBlue` channel；两款游戏的速度与距离均为 SI 单位；金额按游戏原生货币
+（ETS2 为 EUR，ATS 为 USD）原样记录，不做换算。
 
 Telemetry API、游戏 telemetry schema 和公开游戏版本是三个独立的版本域。真实
 启动日志因此可能同时出现：
 
 ```text
-game_display_name="Euro Truck Simulator 2 1.60.1.7s"
+game_display_name="Euro Truck Simulator 2 1.62.2.1001s"
 telemetry_api=1.1
-telemetry_schema=1.19
+telemetry_schema=1.22
 ```
+
+ETS2 1.62 报告的 schema 1.22 比仓库内 SDK 1.16 header 声明的 1.21 更新。ATS 1.62.2
+报告 `telemetry_schema=1.8`，即 ATS schema 1.08。
 
 ## 显式订阅
 
@@ -66,8 +74,8 @@ telemetry_schema=1.19
 | `FrameEnd` | 在一帧更新结束后输出限频 snapshot。 |
 | `Paused` | telemetry 暂停时停止输出驾驶 snapshot。 |
 | `Started` | telemetry 开始时恢复驾驶 snapshot。 |
-| `Configuration` | 解码并记录当前任务配置。 |
-| `Gameplay` | 解码 SDK 1.14 的全部 6 种 gameplay payload。 |
+| `Configuration` | 解码并记录当前任务、car job 与 bus job 配置。 |
+| `Gameplay` | 解码 SDK 1.16 的全部 8 种 gameplay payload。 |
 
 framework 初始化日志应报告：
 
@@ -77,7 +85,7 @@ events=6
 
 ### Channel
 
-示例注册 8 个 scalar channel：
+示例注册 8 个必需 scalar channel 和 1 个可选的 SDK 1.16 channel：
 
 | Channel | SDK 单位/值 | 示例用途 |
 | --- | --- | --- |
@@ -89,12 +97,19 @@ events=6
 | `truck.navigation.time` | 秒 | 剩余导航时间。 |
 | `truck.navigation.speed.limit` | 米每秒 | 当前导航限速，显示为公里每小时。 |
 | `job.cargo.damage` | 比例 | 最新货损值。 |
+| `mandatory.break`（可选） | 游戏内分钟 | 距下一次强制休息的时间；SCS 交付数值之前显示 `n/a`。 |
+
+`mandatory.break` 通过 `subscribe_optional` 订阅。ETS2 1.19 / ATS 1.06 之前的
+schema 没有声明它，framework 会跳过该订阅而不是拒绝整个插件。SCS 文档说明该
+channel 直到 ETS2 1.21 / ATS 1.08 才真正交付数值。
 
 framework 初始化日志应报告：
 
 ```text
-channels=8
+channels=9
 ```
+
+在早于 ETS2 1.19 / ATS 1.06 的 schema 上报告 `channels=8`。
 
 各 channel callback 相互独立。`FrameEnd` 读取每个字段最近收到的值；示例不会
 假设 SCS 在同一帧内按某种固定顺序调用 channel callback。
@@ -106,11 +121,14 @@ channels=8
 telemetry 活跃时，示例每秒最多输出一份 snapshot：
 
 ```text
-[scs-sdk-example] probe speed=85.3km/h rpm=1485 gear=16 \
-position=(27077.895,2.983,-8572.040) heading=0.7134 \
-navigation_distance=705.64km navigation_time=39887s \
-speed_limit=80.0km/h cargo_damage=0.000
+[scs-sdk-example] probe speed=82.0km/h rpm=1176 gear=14 \
+position=(-53829.995,9.757,-102917.080) heading=0.3118 \
+navigation_distance=466.65km navigation_time=24253s \
+speed_limit=90.0km/h cargo_damage=0.000 mandatory_break=630min
 ```
+
+最后一个字段是 SDK 1.16 的 `mandatory.break` channel；SCS 尚未交付数值时显示
+`mandatory_break=n/a`。
 
 存储的 SDK speed 不会被修改。只有显示值会把非常接近零的 signed floating-point
 zero 规范成零，避免输出嘈杂的 `-0.0km/h`。
@@ -128,17 +146,35 @@ income=69663 planned_distance=1614km delivery_time=110550 \
 cargo_loaded=true special_job=false
 ```
 
+ATS car job（SDK 1.16，ATS schema 1.07 及以后）改由 `car_job` 配置记录，包含
+数量、客户优先级以及独立的 `car_job.market` catalog：
+
+```text
+[scs-sdk-example] car job cargo=Lost Wallet cargo_id=v_lostwallet units=1 \
+source=lafayette/jns_rail_str destination=houma/nmq_min_qrys \
+market_raw=dispatch_job market_known=Some(DispatchJob) income=574 \
+planned_distance=113km delivery_time=656391 \
+prio_cargo=false prio_time=false prio_vehicle=true
+```
+
+SCS 未发送的已记录 attribute 一律输出为 `n/a`，不会伪造默认值。
+
+SCS 尚未文档化任何 `bus_job` attribute，因此 bus job 配置只记录
+`[scs-sdk-example] bus job configuration has_attributes=<bool>`。
+
 已知 enum-like value 与原始 SDK 字符串会刻意同时保留。以后新增的值即使还没有
 进入当前 typed catalog，也仍然能在诊断日志中看到。
 
 ### Gameplay event
 
-示例处理 SDK 1.14 header 定义的每一种 gameplay event：
+示例处理 SDK 1.16 header 定义的每一种 gameplay event：
 
 | SDK event | 示例 marker |
 | --- | --- |
 | `job.delivered` | `[scs-sdk-example] job delivered ...` |
+| `car_job.delivered` | `[scs-sdk-example] car job delivered ... vehicle_damage=...` |
 | `job.cancelled` | `[scs-sdk-example] job cancelled ...` |
+| `car_job.cancelled` | `[scs-sdk-example] car job cancelled ...` |
 | `player.fined` | `[scs-sdk-example] player fined ...` |
 | `player.tollgate.paid` | `[scs-sdk-example] tollgate paid ...` |
 | `player.use.ferry` | `[scs-sdk-example] ferry used ...` |
@@ -151,7 +187,20 @@ cargo_loaded=true special_job=false
 [scs-sdk-example] tollgate paid amount=79
 ```
 
-这段顺序证明 `pay.amount` gameplay attribute 已经真实交付，并完成 typed signed
+一次真实的 ATS 1.62.2 car job 交付产生了 SDK 1.16 的 `car_job.delivered`
+payload，其中包括 `vehicle.damage`：
+
+```text
+[scs-sdk-example] car job delivered revenue=682 xp=0 cargo_damage=0.000 \
+vehicle_damage=0.009 distance=115.0km delivery_time=656208min
+```
+
+这段记录采集于 `n/a` 输出之前：尽管 header 列出了 `earned.xp`，ATS 1.62.2 的
+`car_job.delivered` 并未发送该 attribute，因此当前构建会输出 `xp=n/a`。此处游戏
+还把绝对游戏时间作为 `delivery.time` 发送；ETS2 1.62 对 external contract 任务报告
+`delivery_time=4294967295`（`u32` 最大值）。两者都是观察到的游戏行为，按原样记录。
+
+收费站这段顺序证明 `pay.amount` gameplay attribute 已经真实交付，并完成 typed signed
 64-bit 解码；它不只是证明 generic gameplay event 类别注册成功。
 
 ## Safe application 边界
@@ -250,7 +299,7 @@ installer 会：
 loading 'libscs_sdk_telemetry_example'
 [scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" ...
 [scs-sdk-plugin] detected ... telemetry_api=1.1 telemetry_schema=...
-[scs-sdk-plugin] initialized ... events=6 channels=8
+[scs-sdk-plugin] initialized ... events=6 channels=9
 ```
 
 进入驾驶场景后，根据测试目标触发相关行为：开始或暂停 telemetry、接受或加载
@@ -282,7 +331,7 @@ scripts/check-plugin-macro-fixtures.sh
 ## 许可证
 
 workspace 自编 Rust 代码使用 **MIT OR Apache-2.0**。SCS SDK 1.0-1.5 的归属
-声明保存在 [`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013)，SDK 1.6-1.14
+声明保存在 [`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013)，SDK 1.6-1.16
 的归属声明保存在 [`LICENSE-SCS-SDK-2016`](../../LICENSE-SCS-SDK-2016)。完整说明见
 仓库[第三方声明](../../THIRD_PARTY_NOTICES.zh.md)。本示例是独立社区项目，与
 SCS Software 不存在隶属或官方背书关系。

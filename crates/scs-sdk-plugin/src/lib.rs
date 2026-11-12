@@ -1243,7 +1243,7 @@ impl<'a> ConfigurationEvent<'a> {
 
     /// Decodes the documented `controls` shifter type as a Rust enum.
     ///
-    /// `None` covers an absent attribute and a future string which SDK 1.14 did
+    /// `None` covers an absent attribute and a future string which SDK 1.16 did
     /// not document. Call [`ConfigurationEvent::string`] with
     /// [`sdk::configuration::attributes::SHIFTER_TYPE`] when the original
     /// unknown text must be retained for forward-compatible diagnostics.
@@ -1256,11 +1256,24 @@ impl<'a> ConfigurationEvent<'a> {
     /// Decodes the documented active-job market as a Rust enum.
     ///
     /// Unknown future values remain accessible through the generic string
-    /// accessor instead of being reclassified as one of the known SDK 1.14
+    /// accessor instead of being reclassified as one of the known SDK 1.16
     /// variants.
     #[must_use]
     pub fn job_market(self) -> Option<sdk::configuration::JobMarket> {
         let value = self.string(sdk::configuration::attributes::JOB_MARKET)?;
+        value.parse().ok()
+    }
+
+    /// Decodes the documented car-job market as a Rust enum.
+    ///
+    /// The attribute is carried by the ATS `car_job` configuration (schema
+    /// 1.07 and later). Unknown future values remain accessible through the
+    /// generic string accessor with
+    /// [`sdk::configuration::attributes::CAR_JOB_MARKET`] instead of being
+    /// reclassified as one of the known SDK 1.16 variants.
+    #[must_use]
+    pub fn car_job_market(self) -> Option<sdk::configuration::CarJobMarket> {
+        let value = self.string(sdk::configuration::attributes::CAR_JOB_MARKET)?;
         value.parse().ok()
     }
 }

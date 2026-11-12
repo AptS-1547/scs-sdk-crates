@@ -4,13 +4,13 @@
 
 **用安全、强类型的 Rust 构建原生 SCS telemetry 与 input-device 插件。**
 
-完整覆盖 SDK 1.14 的公开 Telemetry 与 Input 接口 · 审计过的 FFI 与生命周期边界 · 已验证三平台产物
+完整覆盖 SDK 1.16 的公开 Telemetry 与 Input 接口 · 审计过的 FFI 与生命周期边界 · 已验证三平台产物
 
 [English](README.md) · **简体中文**
 
 </div>
 
-`scs-sdk-crates` 是面向 **SCS SDK 1.14** 公开 telemetry 与 input-device
+`scs-sdk-crates` 是面向 **SCS SDK 1.16** 公开 telemetry 与 input-device
 接口的可复用 Rust 基座。它把官方 C ABI 转化为强类型 `no_std` binding，
 提供彼此独立的安全 plugin runtime，并通过真实示例验证应用边界和最终产物。
 
@@ -18,24 +18,24 @@
 裸指针、手写导出符号或应用层 `unsafe`。
 
 > [!IMPORTANT]
-> 本仓库完整覆盖 SCS SDK 1.14 中的公开 **Telemetry API 1.00/1.01** 与
+> 本仓库完整覆盖 SCS SDK 1.16 中的公开 **Telemetry API 1.00/1.01** 与
 > **Input API 1.00**。覆盖声明严格限定在这些已审计接口，不外推到未来尚未出现
 > 的 SDK surface。
 
 > [!NOTE]
 > 这是独立的社区项目，与 SCS Software 不存在隶属或背书关系。
-> [`third-party/scs_sdk_1_14/`](third-party/scs_sdk_1_14/) 中的官方文件始终是
+> [`third-party/scs_sdk_1_16/`](third-party/scs_sdk_1_16/) 中的官方文件始终是
 > ABI 与常量的事实来源。完整说明见[第三方声明](THIRD_PARTY_NOTICES.zh.md)。
 
 ## 为什么需要这个 workspace
 
 | 需求 | 本仓库提供的能力 |
 | --- | --- |
-| 可审计的 SDK 覆盖 | 按 header 顺序保存 raw catalog 与 typed catalog，覆盖全部 107 个 channel、6 个 configuration ID、60 个 configuration attribute、6 个 gameplay event 与 15 个 gameplay attribute。 |
+| 可审计的 SDK 覆盖 | 按 header 顺序保存 raw catalog 与 typed catalog，覆盖全部 108 个 channel、8 个 configuration ID、64 个 configuration attribute、8 个 gameplay event 与 16 个 gameplay attribute。 |
 | 安全的应用代码 | 独立的 `TelemetryPlugin` 与 `InputPlugin` API 提供 typed value、index、game identity、compatibility 与显式 registration。 |
 | 统一的 runtime 正确性 | Telemetry 事务与 Input device lifetime、panic containment、稳定 callback context、poison recovery 和 stale-callback isolation。 |
 | 可信的产物验证 | Release 脚本会在链接与符号裁剪后检查 PE、ELF、Mach-O、x86-64 架构以及精确的 API-specific export set。 |
-| 真实游戏证据 | 安全示例在 ETS2 中接收 6 类 event 与 8 个 channel；独立 probe 验证 loader 文档规定的 API fallback 顺序。 |
+| 真实游戏证据 | 安全示例在 ETS2 与 ATS 中接收 6 类 event、8 个必需 channel 与 1 个可选 channel；独立 probe 验证 loader 文档规定的 API fallback 顺序。 |
 
 它刻意只做基座，而不是产品插件。Web bridge、调度逻辑、持久化、存档处理与用户
 界面应当位于下游产品仓库。
@@ -109,19 +109,29 @@ UI 的直接 game-mix routing。
 启动日志会同时报告 framework 身份、协商版本、检测到的游戏身份和已经提交的订阅：
 
 ```text
-[scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" version="0.1.0" framework_version="0.1.0"
-[scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
-[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.0" events=6 channels=8
+[scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" version="0.1.1" framework_version="0.1.1"
+[scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.62.2.1001s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.22
+[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.1" events=6 channels=9
 ```
 
-进入游戏后，它会解码 typed snapshot、任务配置以及 SDK 1.14 的全部 6 种 gameplay
-payload。下面是一条真实 snapshot 的形式：
+同一构建在 American Truck Simulator 中：
 
 ```text
-[scs-sdk-example] probe speed=85.3km/h rpm=1485 gear=16 \
-position=(27077.895,2.983,-8572.040) heading=0.7134 \
-navigation_distance=705.64km navigation_time=39887s \
-speed_limit=80.0km/h cargo_damage=0.000
+[scs-sdk-plugin] detected game_display_name="American Truck Simulator 1.62.2.1000s" game_id="ats" telemetry_api=1.1 telemetry_schema=1.8
+[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.1" events=6 channels=9
+```
+
+ETS2 1.62 报告的 schema 1.22 比 SDK 1.16 header 声明的 1.21 更新；framework 在
+声明的 major 版本族内接受它，并仍然注册全部 SDK 1.16 能力。
+
+进入游戏后，它会解码 typed snapshot、任务与 car job 配置以及 SDK 1.16 的全部 8 种
+gameplay payload。下面是一条真实 snapshot 的形式：
+
+```text
+[scs-sdk-example] probe speed=82.0km/h rpm=1176 gear=14 \
+position=(-53829.995,9.757,-102917.080) heading=0.3118 \
+navigation_distance=466.65km navigation_time=24253s \
+speed_limit=90.0km/h cargo_damage=0.000 mandatory_break=630min
 ```
 
 独立的 [`telemetry-fallback-plugin`](examples/telemetry-fallback-plugin/) 会故意以
@@ -164,25 +174,26 @@ scs-sdk-sys ← scs-sdk ← scs-sdk-plugin ← application
                                      ↖ scs-sdk-plugin-macros
 ```
 
-## Telemetry SDK 1.14 的强类型覆盖
+## Telemetry SDK 1.16 的强类型覆盖
 
 清单直接源自官方 header，并通过测试检查名称、数量、顺序、重复项、value type、
 association 以及 indexed/scalar 行为。
 
 | Surface | 数量 | Typed 入口 |
 | --- | ---: | --- |
-| Channels | **107** | `channels::ALL` |
-| Configuration IDs | **6** | `configuration::ids::ALL` |
-| Configuration attributes | **60** | `configuration::attributes::ALL` |
-| Configuration associations | **71** | `configuration::associations::ALL` |
-| Gameplay events | **6** | `gameplay::events::ALL` |
-| Gameplay attributes | **15** | `gameplay::attributes::ALL` |
-| Gameplay associations | **21** | `gameplay::associations::ALL` |
+| Channels | **108** | `channels::ALL` |
+| Configuration IDs | **8** | `configuration::ids::ALL` |
+| Configuration attributes | **64** | `configuration::attributes::ALL` |
+| Configuration associations | **89** | `configuration::associations::ALL` |
+| Gameplay events | **8** | `gameplay::events::ALL` |
+| Gameplay attributes | **16** | `gameplay::attributes::ALL` |
+| Gameplay associations | **28** | `gameplay::associations::ALL` |
 | H-shifter values | **4** | `ShifterType::ALL` |
 | Job-market values | **5** | `JobMarket::ALL` |
+| Car-job-market values | **2** | `CarJobMarket::ALL` |
 | Fine-offence values | **14** | `FineOffence::ALL` |
 
-覆盖范围还包括 SDK 1.14 中所有公开 telemetry ABI value type、result code、delivery
+覆盖范围还包括 SDK 1.16 中所有公开 telemetry ABI value type、result code、delivery
 flag、initialization structure、callback payload、game ID、Telemetry API version，以及
 ETS2/ATS telemetry game-version constant。
 
@@ -235,7 +246,7 @@ Input 是独立 API surface，不会被硬塞进 `TelemetryPlugin`：
   `Sync`，与 SCS 的 callback scope 和主线程要求一致。
 
 Capability history 同样是显式数据。每个 descriptor 与 association 都携带根据官方
-SDK 1.0 至 1.14 header 独立整理的 ETS2/ATS schema minimum。Gameplay event 与
+SDK 1.0 至 1.16 header 独立整理的 ETS2/ATS schema minimum。Gameplay event 与
 signed 64-bit value 需要 Telemetry API 1.01 之类的 API-level 要求，则始终与每个
 游戏的 schema availability 分开。
 
@@ -369,8 +380,8 @@ examples/telemetry-plugin/      真实的 safe application-boundary plugin
 examples/telemetry-fallback-plugin/
                                 手动 loader fallback E2E probe
 scripts/                        boundary、build、install 与 artifact 检查
-third-party/scs_sdk_1_14/       官方 SDK 1.14 分发
-third-party/scs_sdk_history/    官方 SDK 1.0–1.14 历史与声明
+third-party/scs_sdk_1_16/       官方 SDK 1.16 分发
+third-party/scs_sdk_history/    官方 SDK 1.0–1.16 历史与声明
 ```
 
 | 接下来阅读 | 用途 |
@@ -423,7 +434,7 @@ build script。只在 host 平台通过 Cargo build 不能证明跨平台产物�
 
 官方 SDK 文件以及来源于 SCS SDK 的 ABI declaration、constant、identifier、catalog、
 schema-history metadata 与相关文档保留 SCS Software 的声明。SDK 1.0–1.5 使用
-[2013 年声明](LICENSE-SCS-SDK-2013)，SDK 1.6–1.14 使用
+[2013 年声明](LICENSE-SCS-SDK-2013)，SDK 1.6–1.16 使用
 [2016 年声明](LICENSE-SCS-SDK-2016)。这些材料不会被重新许可为 workspace license。
 
 完整归属与项目独立性说明见[第三方声明](THIRD_PARTY_NOTICES.zh.md)。

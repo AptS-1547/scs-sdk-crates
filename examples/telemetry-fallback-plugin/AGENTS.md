@@ -13,7 +13,7 @@ specialized real-ETS loader negotiation probe, not a normal product example.
   attempts and the accepted callback session.
 - Keep this policy isolated from examples/telemetry-plugin. The normal example
   should continue accepting the newest audited API and exercising the complete
-  SDK 1.14 telemetry surface.
+  SDK 1.16 telemetry surface.
 - Remain a manual E2E fixture. Do not turn intentional version rejection into a
   default framework policy or a recommendation for product plugins.
 
@@ -28,7 +28,7 @@ specialized real-ETS loader negotiation probe, not a normal product example.
 
 ## Behavior Contract
 
-- `ACCEPTED_FALLBACK_API` remains `TelemetryApiVersion::V1_00` while SDK 1.14's
+- `ACCEPTED_FALLBACK_API` remains `TelemetryApiVersion::V1_00` while SDK 1.16's
   current API is 1.01. Changing either side requires a new real-game test plan.
 - The compatibility minimum remains API 1.00 so the framework admits the 1.00
   retry. The initialize hook owns the intentional exact-version rejection.

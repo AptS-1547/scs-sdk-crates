@@ -45,17 +45,27 @@ The example requires:
 | --- | ---: | --- |
 | Telemetry API | 1.01 | Gameplay events and signed 64-bit gameplay values require API 1.01. |
 | ETS2 telemetry schema | 1.14 | SCS introduced the gameplay-event descriptors in this game schema. |
-| Game | Euro Truck Simulator 2 | The example's compatibility declaration currently lists ETS2 explicitly. |
+| ATS telemetry schema | 1.01 | The same gameplay-event introduction in the ATS schema history. |
+| Game | Euro Truck Simulator 2, American Truck Simulator | The compatibility declaration lists both games explicitly. |
+
+ATS was audited before it was added: every subscribed channel exists in ATS, the
+example uses no `AdBlue` channel (ATS does not provide one), speeds and
+distances are SI in both games, and money values are logged verbatim in the
+game's native currency (EUR in ETS2, USD in ATS).
 
 Telemetry API version, game telemetry schema, and public game version are
 separate version domains. A real startup log may therefore contain values such
 as:
 
 ```text
-game_display_name="Euro Truck Simulator 2 1.60.1.7s"
+game_display_name="Euro Truck Simulator 2 1.62.2.1001s"
 telemetry_api=1.1
-telemetry_schema=1.19
+telemetry_schema=1.22
 ```
+
+ETS2 1.62 reports schema 1.22, newer than the 1.21 declared by the vendored SDK
+1.16 headers. ATS 1.62.2 reports `telemetry_schema=1.8`, which is ATS schema
+1.08.
 
 ## Explicit subscriptions
 
@@ -69,8 +79,8 @@ The example registers all six telemetry event classes explicitly:
 | `FrameEnd` | Emit a rate-limited snapshot after the frame's updates. |
 | `Paused` | Stop driving snapshots while telemetry is paused. |
 | `Started` | Resume driving snapshots when telemetry starts. |
-| `Configuration` | Decode and log the active job configuration. |
-| `Gameplay` | Decode all six gameplay event payload shapes from SDK 1.14. |
+| `Configuration` | Decode and log the active job, car-job, and bus-job configuration. |
+| `Gameplay` | Decode all eight gameplay event payload shapes from SDK 1.16. |
 
 The initialized framework line should report:
 
@@ -80,7 +90,8 @@ events=6
 
 ### Channels
 
-The example registers eight scalar channels:
+The example registers eight required scalar channels and one optional SDK 1.16
+channel:
 
 | Channel | SDK unit/value | Example use |
 | --- | --- | --- |
@@ -92,12 +103,20 @@ The example registers eight scalar channels:
 | `truck.navigation.time` | seconds | Remaining navigation time. |
 | `truck.navigation.speed.limit` | metres per second | Current navigation speed limit, displayed in kilometres per hour. |
 | `job.cargo.damage` | ratio | Latest cargo-damage value. |
+| `mandatory.break` (optional) | in-game minutes | Time until the next mandatory break; `n/a` until SCS delivers a value. |
+
+`mandatory.break` is subscribed with `subscribe_optional`. Schemas before ETS2
+1.19 / ATS 1.06 do not declare it, so the framework skips it there instead of
+rejecting the plugin. SCS documents that the channel was only actually
+delivered from ETS2 1.21 / ATS 1.08.
 
 The initialized framework line should report:
 
 ```text
-channels=8
+channels=9
 ```
+
+On a schema older than ETS2 1.19 / ATS 1.06 it reports `channels=8`.
 
 Channel callbacks are independent. `FrameEnd` reads the most recent value of
 each field; the example does not assume that SCS invokes channel callbacks in a
@@ -110,11 +129,14 @@ particular order inside a frame.
 While telemetry is active, the example emits at most one snapshot per second:
 
 ```text
-[scs-sdk-example] probe speed=85.3km/h rpm=1485 gear=16 \
-position=(27077.895,2.983,-8572.040) heading=0.7134 \
-navigation_distance=705.64km navigation_time=39887s \
-speed_limit=80.0km/h cargo_damage=0.000
+[scs-sdk-example] probe speed=82.0km/h rpm=1176 gear=14 \
+position=(-53829.995,9.757,-102917.080) heading=0.3118 \
+navigation_distance=466.65km navigation_time=24253s \
+speed_limit=90.0km/h cargo_damage=0.000 mandatory_break=630min
 ```
+
+The last field is the SDK 1.16 `mandatory.break` channel. It shows
+`mandatory_break=n/a` while SCS has not delivered a value.
 
 The stored SDK speed is not modified. Only the displayed value normalizes a
 very small signed floating-point zero to avoid noisy `-0.0km/h` output.
@@ -133,18 +155,38 @@ income=69663 planned_distance=1614km delivery_time=110550 \
 cargo_loaded=true special_job=false
 ```
 
+An ATS car job (SDK 1.16, ATS schema 1.07 and later) is logged from the
+`car_job` configuration instead. It reports a unit count, customer priorities,
+and the separate `car_job.market` catalog:
+
+```text
+[scs-sdk-example] car job cargo=Lost Wallet cargo_id=v_lostwallet units=1 \
+source=lafayette/jns_rail_str destination=houma/nmq_min_qrys \
+market_raw=dispatch_job market_known=Some(DispatchJob) income=574 \
+planned_distance=113km delivery_time=656391 \
+prio_cargo=false prio_time=false prio_vehicle=true
+```
+
+Every logged attribute that SCS omits is printed as `n/a` rather than a
+fabricated default.
+
+SCS has not yet documented any `bus_job` attribute, so a bus-job configuration
+only logs `[scs-sdk-example] bus job configuration has_attributes=<bool>`.
+
 Known enum-like values and their raw SDK strings are deliberately retained
 together. A future additive value remains diagnosable even when the current
 typed catalog does not recognize it.
 
 ### Gameplay events
 
-The example handles every gameplay event defined by the SDK 1.14 header:
+The example handles every gameplay event defined by the SDK 1.16 header:
 
 | SDK event | Example marker |
 | --- | --- |
 | `job.delivered` | `[scs-sdk-example] job delivered ...` |
+| `car_job.delivered` | `[scs-sdk-example] car job delivered ... vehicle_damage=...` |
 | `job.cancelled` | `[scs-sdk-example] job cancelled ...` |
+| `car_job.cancelled` | `[scs-sdk-example] car job cancelled ...` |
 | `player.fined` | `[scs-sdk-example] player fined ...` |
 | `player.tollgate.paid` | `[scs-sdk-example] tollgate paid ...` |
 | `player.use.ferry` | `[scs-sdk-example] ferry used ...` |
@@ -157,7 +199,22 @@ A real ETS2 tollgate validation produced:
 [scs-sdk-example] tollgate paid amount=79
 ```
 
-That sequence proves delivery and typed signed-64-bit decoding of the
+A real ATS 1.62.2 car-job delivery produced the SDK 1.16 `car_job.delivered`
+payload, including `vehicle.damage`:
+
+```text
+[scs-sdk-example] car job delivered revenue=682 xp=0 cargo_damage=0.000 \
+vehicle_damage=0.009 distance=115.0km delivery_time=656208min
+```
+
+That capture predates the `n/a` rendering: ATS 1.62.2 sends no `earned.xp`
+attribute with `car_job.delivered` even though the header lists it, so the
+current build logs `xp=n/a`. The game also sends an absolute in-game time as
+`delivery.time` here, and ETS2 1.62 reports `delivery_time=4294967295` (the
+`u32` maximum) for external-contract jobs; both are observed game behavior,
+logged verbatim.
+
+The tollgate sequence proves delivery and typed signed-64-bit decoding of the
 `pay.amount` gameplay attribute, rather than merely proving that the generic
 gameplay event class was registered.
 
@@ -258,7 +315,7 @@ On startup, confirm:
 loading 'libscs_sdk_telemetry_example'
 [scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" ...
 [scs-sdk-plugin] detected ... telemetry_api=1.1 telemetry_schema=...
-[scs-sdk-plugin] initialized ... events=6 channels=8
+[scs-sdk-plugin] initialized ... events=6 channels=9
 ```
 
 Enter the driving scene and exercise the behavior relevant to the test: start
@@ -293,7 +350,7 @@ platform build-and-verification scripts listed above.
 
 Workspace-authored Rust code is licensed under **MIT OR Apache-2.0**. SCS SDK
 1.0-1.5 attribution is preserved in
-[`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013), and SDK 1.6-1.14
+[`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013), and SDK 1.6-1.16
 attribution is preserved in
 [`LICENSE-SCS-SDK-2016`](../../LICENSE-SCS-SDK-2016). See the repository's
 [Third-Party Notices](../../THIRD_PARTY_NOTICES.md). This is an independent

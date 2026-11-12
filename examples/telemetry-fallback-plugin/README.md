@@ -16,7 +16,7 @@ framework.
 The official loader tries API versions from newest to oldest and continues only
 when `scs_telemetry_init` returns `SCS_RESULT_unsupported`.
 
-For SDK 1.14's two audited telemetry APIs, this fixture expects:
+For SDK 1.16's two audited telemetry APIs, this fixture expects:
 
 | Attempt | Product result | Expected loader behavior |
 | --- | --- | --- |
@@ -218,7 +218,7 @@ scripts/install-macos-plugin.sh
 ```
 
 See [`../telemetry-plugin/README.md`](../telemetry-plugin/README.md) for the
-normal six-event/eight-channel example.
+normal six-event/nine-channel example.
 
 ## Development checks
 
@@ -252,7 +252,7 @@ API-1.00 callback paths.
 
 Workspace-authored Rust code is licensed under **MIT OR Apache-2.0**. SCS SDK
 1.0-1.5 attribution is preserved in
-[`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013), and SDK 1.6-1.14
+[`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013), and SDK 1.6-1.16
 attribution is preserved in
 [`LICENSE-SCS-SDK-2016`](../../LICENSE-SCS-SDK-2016). See the repository's
 [Third-Party Notices](../../THIRD_PARTY_NOTICES.md). This is an independent

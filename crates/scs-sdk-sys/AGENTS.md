@@ -1,13 +1,13 @@
 # scs-sdk-sys Instructions
 
 This file supplements the repository-level AGENTS.md for the scs-sdk-sys crate.
-Read the official headers under third-party/scs_sdk_1_14/ before changing ABI
+Read the official headers under third-party/scs_sdk_1_16/ before changing ABI
 definitions or constants.
 
 ## Ownership
 
 - This crate is the dependency-free, no_std, x86-64 raw ABI layer for the public
-  SCS SDK 1.14 Telemetry headers and Input API 1.00 headers.
+  SCS SDK 1.16 Telemetry headers and Input API 1.00 headers.
 - Mirror C layout, numeric values, function signatures, calling conventions, and
   header-defined byte strings. Do not add plugin lifecycle, owned application
   values, string conversion, logging policy, or ergonomic registration APIs here.
@@ -49,8 +49,8 @@ definitions or constants.
 - Keep the header-shaped SCS_GAME_ID_* constants as the byte-string source of
   truth. Ergonomic games::*::GAME_ID paths may alias those constants, but must
   not repeat the foreign byte strings as independent declarations.
-- The current telemetry inventory is 107 channels, 6 configuration IDs,
-  60 configuration attributes, 6 gameplay events, and 15 gameplay attributes.
+- The current telemetry inventory is 108 channels, 8 configuration IDs,
+  64 configuration attributes, 8 gameplay events, and 16 gameplay attributes.
   Any count change requires official-header evidence and synchronized upper-layer
   tests and documentation.
 - Keep Input coverage complete as one audited ABI family: version constants,

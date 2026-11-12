@@ -2,20 +2,20 @@
 
 [简体中文](THIRD_PARTY_NOTICES.zh.md) | **English**
 
-## SCS SDK 1.0 through 1.14
+## SCS SDK 1.0 through 1.16
 
 This repository interoperates with and derives portions of its ABI
 declarations, constants, identifiers, catalogs, and related documentation from
-the official SCS SDK 1.0 through 1.14 archive series. Historical headers were
-used to derive per-game schema availability; SDK 1.14 remains the current ABI
+the official SCS SDK 1.0 through 1.16 archive series. Historical headers were
+used to derive per-game schema availability; SDK 1.16 remains the current ABI
 and constant source of truth.
 
 - SDK 1.0 through 1.5 copyright: `Copyright (C) 2013 SCS Software`
-- SDK 1.6 through 1.14 copyright: `Copyright (C) 2016 SCS Software`
+- SDK 1.6 through 1.16 copyright: `Copyright (C) 2016 SCS Software`
 - Archive URLs, checksums, and license mapping:
   [`third-party/scs_sdk_history/`](third-party/scs_sdk_history/)
 - Current vendored SDK:
-  [`third-party/scs_sdk_1_14/`](third-party/scs_sdk_1_14/)
+  [`third-party/scs_sdk_1_16/`](third-party/scs_sdk_1_16/)
 - Preserved distribution notices:
   [`LICENSE-SCS-SDK-2013`](LICENSE-SCS-SDK-2013) and
   [`LICENSE-SCS-SDK-2016`](LICENSE-SCS-SDK-2016)

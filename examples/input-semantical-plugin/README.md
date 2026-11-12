@@ -7,7 +7,7 @@ semantical device class. It builds a real native plugin for Euro Truck
 Simulator 2 or American Truck Simulator while keeping handwritten application
 code free of raw pointers, C strings, external ABI declarations, and `unsafe`.
 
-The fixture follows the official SDK 1.14 `input_semantical` example: it
+The fixture follows the official SDK 1.16 `input_semantical` example: it
 registers one bool input named `light`. SCS maps that name directly to the
 game's `semantical.light?0` mix, so the plugin works without a controller
 binding step.

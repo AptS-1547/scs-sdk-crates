@@ -9,7 +9,7 @@ pub const MAX_TRAILERS: usize = 10;
 /// Configuration group identifiers.
 pub mod ids {
     /// Number of configuration IDs declared by the official header.
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 8;
 
     /// Configuration of the substances.
     ///
@@ -19,7 +19,7 @@ pub mod ids {
     /// - `id`
     ///
     /// The upstream SDK header leaves the remaining substance attributes as a
-    /// TODO, so version 1.14 does not define any additional public names here.
+    /// TODO, so version 1.16 does not define any additional public names here.
     pub const SUBSTANCES: &[u8] = b"substances\0";
 
     /// Static configuration of the controls.
@@ -124,14 +124,52 @@ pub mod ids {
     /// - `planned_distance_km`
     pub const JOB: &[u8] = b"job\0";
 
+    /// Static configuration of the bus job.
+    ///
+    /// If empty set of attributes is returned, there is no bus job.
+    ///
+    /// Supported attributes will be documented after release of bus dlc.
+    ///
+    /// Introduced by ETS2 telemetry 1.20.
+    pub const BUS_JOB: &[u8] = b"bus_job\0";
+
+    /// Static configuration of the car job.
+    ///
+    /// If empty set of attributes is returned, there is no car job.
+    ///
+    /// Supported attributes:
+    /// - `cargo_id`
+    /// - cargo
+    /// - `cargo_unit_count`
+    /// - `destination_city_id`
+    /// - `destination_city`
+    /// - `source_city_id`
+    /// - `source_city`
+    /// - `destination_company_id`
+    /// - `destination_company`
+    /// - `source_company_id`
+    /// - `source_company`
+    /// - income - represents expected income for the car job without any penalties
+    /// - `delivery_time`
+    /// - `car_job_market`
+    /// - `customer_prio_cargo_handling`
+    /// - `customer_prio_time`
+    /// - `customer_prio_vehicle_appearance`
+    /// - `planned_distance_km`
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    pub const CAR_JOB: &[u8] = b"car_job\0";
+
     /// All raw configuration identifiers in official header order.
-    pub const ALL: [&[u8]; COUNT] = [SUBSTANCES, CONTROLS, HSHIFTER, TRUCK, TRAILER, JOB];
+    pub const ALL: [&[u8]; COUNT] = [
+        SUBSTANCES, CONTROLS, HSHIFTER, TRUCK, TRAILER, JOB, BUS_JOB, CAR_JOB,
+    ];
 }
 
 /// Attribute names used by configuration events.
 pub mod attributes {
     /// Number of configuration attributes declared by the official header.
-    pub const COUNT: usize = 60;
+    pub const COUNT: usize = 64;
 
     /// Brand id for configuration purposes.
     ///
@@ -500,10 +538,44 @@ pub mod attributes {
     /// Type: string
     pub const JOB_MARKET: &[u8] = b"job.market\0";
 
+    /// The car job market this car job is from.
+    ///
+    /// The value is a string representing the type of the car job market.
+    /// Possible values:
+    /// - `quick_job`
+    /// - `dispatch_job`
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    ///
+    /// Type: string
+    pub const CAR_JOB_MARKET: &[u8] = b"car_job.market\0";
+
     /// Flag indicating that the job is special transport job.
     ///
     /// Type: bool
     pub const SPECIAL_JOB: &[u8] = b"is.special.job\0";
+
+    /// Flag indicating that the car job's customer prioritizes cargo handling.
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    ///
+    /// Type: bool
+    pub const CUSTOMER_PRIO_CARGO_HANDLING: &[u8] = b"customer.prio.cargo\0";
+
+    /// Flag indicating that the car job's customer prioritizes delivery time.
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    ///
+    /// Type: bool
+    pub const CUSTOMER_PRIO_TIME: &[u8] = b"customer.prio.time\0";
+
+    /// Flag indicating that the car job's customer prioritizes vehicle
+    /// appearance at delivery.
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    ///
+    /// Type: bool
+    pub const CUSTOMER_PRIO_VEHICLE_APPEARANCE: &[u8] = b"customer.prio.vehicle\0";
 
     /// All raw configuration attribute names in official header order.
     pub const ALL: [&[u8]; COUNT] = [
@@ -566,7 +638,11 @@ pub mod attributes {
         PLANNED_DISTANCE_KM,
         IS_CARGO_LOADED,
         JOB_MARKET,
+        CAR_JOB_MARKET,
         SPECIAL_JOB,
+        CUSTOMER_PRIO_CARGO_HANDLING,
+        CUSTOMER_PRIO_TIME,
+        CUSTOMER_PRIO_VEHICLE_APPEARANCE,
     ];
 }
 
@@ -594,4 +670,4 @@ pub mod shifter_types {
 /// Total number of string macros covered by this module.
 pub const STRING_COUNT: usize = ids::COUNT + attributes::COUNT + shifter_types::COUNT;
 
-const _: [(); 70] = [(); STRING_COUNT];
+const _: [(); 76] = [(); STRING_COUNT];

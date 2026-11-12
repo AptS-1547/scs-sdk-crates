@@ -141,9 +141,9 @@ SCS export。
 Workspace 自有 Rust 代码可由你选择使用
 [Apache License 2.0](LICENSE-APACHE) 或 [MIT](LICENSE-MIT)。
 
-来源于 SDK 1.0 到 1.14 的 loader symbol 名称、ABI contract 与相关文档保留两份
+来源于 SDK 1.0 到 1.16 的 loader symbol 名称、ABI contract 与相关文档保留两份
 原始 SCS Software 声明：SDK 1.0-1.5 见
-[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.14 见
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.16 见
 [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016)。
-[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip)
 仍是第三方材料，不会被重新许可为 workspace license。

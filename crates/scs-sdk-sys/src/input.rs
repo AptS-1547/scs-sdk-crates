@@ -2,8 +2,9 @@
 //!
 //! These definitions mirror `scssdk_input.h`, `scssdk_input_device.h`,
 //! `scssdk_input_event.h`, and the ETS2/ATS input-version headers from the
-//! official SDK 1.14 distribution. The input API was introduced by SDK 1.14;
-//! none of the official SDK 1.0 through 1.13 archives contain these headers.
+//! official SDK 1.16 distribution. The input API was introduced by SDK 1.14
+//! and is unchanged in SDK 1.16; none of the official SDK 1.0 through 1.13
+//! archives contain these headers.
 
 use core::mem::{offset_of, size_of};
 
@@ -12,19 +13,19 @@ use crate::{
     ScsValueBool, ScsValueFloat, ScsValueType, make_version,
 };
 
-/// Initial and current input API version declared by SDK 1.14.
+/// Initial and current input API version declared by SDK 1.16.
 pub const SCS_INPUT_VERSION_1_00: ScsU32 = make_version(1, 0);
-/// Latest input API version declared by SDK 1.14.
+/// Latest input API version declared by SDK 1.16.
 pub const SCS_INPUT_VERSION_CURRENT: ScsU32 = SCS_INPUT_VERSION_1_00;
 
 /// Initial and current ETS2 game version for the input API.
 pub const SCS_INPUT_EUT2_GAME_VERSION_1_00: ScsU32 = make_version(1, 0);
-/// Latest ETS2 input game version declared by SDK 1.14.
+/// Latest ETS2 input game version declared by SDK 1.16.
 pub const SCS_INPUT_EUT2_GAME_VERSION_CURRENT: ScsU32 = SCS_INPUT_EUT2_GAME_VERSION_1_00;
 
 /// Initial and current ATS game version for the input API.
 pub const SCS_INPUT_ATS_GAME_VERSION_1_00: ScsU32 = make_version(1, 0);
-/// Latest ATS input game version declared by SDK 1.14.
+/// Latest ATS input game version declared by SDK 1.16.
 pub const SCS_INPUT_ATS_GAME_VERSION_CURRENT: ScsU32 = SCS_INPUT_ATS_GAME_VERSION_1_00;
 
 /// Raw discriminator used by `scs_input_device_t::type`.
@@ -133,7 +134,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn input_constants_match_the_sdk_1_14_headers() {
+    fn input_constants_match_the_sdk_1_16_headers() {
         assert_eq!(SCS_INPUT_VERSION_CURRENT, make_version(1, 0));
         assert_eq!(SCS_INPUT_EUT2_GAME_VERSION_CURRENT, make_version(1, 0));
         assert_eq!(SCS_INPUT_ATS_GAME_VERSION_CURRENT, make_version(1, 0));

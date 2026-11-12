@@ -2,18 +2,18 @@
 
 **简体中文** | [English](THIRD_PARTY_NOTICES.md)
 
-## SCS SDK 1.0 到 1.14
+## SCS SDK 1.0 到 1.16
 
-本仓库与官方 SCS SDK 1.0 到 1.14 历史压缩包系列互操作，部分 ABI 声明、常量、
+本仓库与官方 SCS SDK 1.0 到 1.16 历史压缩包系列互操作，部分 ABI 声明、常量、
 标识符、catalog 和相关文档来源于这些 SDK。历史 header 用于推导 per-game schema
-availability；SDK 1.14 仍是当前 ABI 与常量的权威来源。
+availability；SDK 1.16 仍是当前 ABI 与常量的权威来源。
 
 - SDK 1.0 到 1.5 版权所有：`Copyright (C) 2013 SCS Software`
-- SDK 1.6 到 1.14 版权所有：`Copyright (C) 2016 SCS Software`
+- SDK 1.6 到 1.16 版权所有：`Copyright (C) 2016 SCS Software`
 - 压缩包 URL、checksum 与许可证映射：
   [`third-party/scs_sdk_history/`](third-party/scs_sdk_history/)
 - 当前 vendored SDK：
-  [`third-party/scs_sdk_1_14/`](third-party/scs_sdk_1_14/)
+  [`third-party/scs_sdk_1_16/`](third-party/scs_sdk_1_16/)
 - 用于分发的两份原始声明：
   [`LICENSE-SCS-SDK-2013`](LICENSE-SCS-SDK-2013) 与
   [`LICENSE-SCS-SDK-2016`](LICENSE-SCS-SDK-2016)

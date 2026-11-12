@@ -12,14 +12,18 @@ use crate::{GameSchemaAvailability, UnknownStringValue, game};
 // representation additionally requires Telemetry API 1.01, which remains a
 // separate capability check owned by Event and ValueType.
 const GAMEPLAY_AVAILABILITY: GameSchemaAvailability = game::capabilities::GAMEPLAY_EVENTS;
+// Car-job gameplay events are documented only by the ATS changelog (1.07);
+// no ETS2 schema declares them.
+const CAR_JOB_AVAILABILITY: GameSchemaAvailability =
+    GameSchemaAvailability::new(None, Some(game::ats::V1_07));
 
 /// Gameplay event identifiers.
 pub mod events {
-    use super::GAMEPLAY_AVAILABILITY;
+    use super::{CAR_JOB_AVAILABILITY, GAMEPLAY_AVAILABILITY};
     use crate::GameplayEventId;
 
     /// Number of official gameplay event identifiers.
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 8;
 
     /// Event called when job is cancelled.
     ///
@@ -27,6 +31,15 @@ pub mod events {
     /// - `cancel_penalty`
     pub const JOB_CANCELLED: GameplayEventId =
         GameplayEventId::new(c"job.cancelled", GAMEPLAY_AVAILABILITY);
+
+    /// Event called when car job is cancelled.
+    ///
+    /// Attributes:
+    /// - `cancel_penalty`
+    ///
+    /// Introduced by ATS telemetry schema 1.07; no ETS2 schema declares it.
+    pub const CAR_JOB_CANCELLED: GameplayEventId =
+        GameplayEventId::new(c"car_job.cancelled", CAR_JOB_AVAILABILITY);
 
     /// Event called when job is delivered.
     ///
@@ -40,6 +53,20 @@ pub mod events {
     /// - `autoload_used`
     pub const JOB_DELIVERED: GameplayEventId =
         GameplayEventId::new(c"job.delivered", GAMEPLAY_AVAILABILITY);
+
+    /// Event called when car job is delivered.
+    ///
+    /// Attributes:
+    /// - revenue
+    /// - `earned_xp`
+    /// - `cargo_damage`
+    /// - `vehicle_damage`
+    /// - `distance_km`
+    /// - `delivery_time`
+    ///
+    /// Introduced by ATS telemetry schema 1.07; no ETS2 schema declares it.
+    pub const CAR_JOB_DELIVERED: GameplayEventId =
+        GameplayEventId::new(c"car_job.delivered", CAR_JOB_AVAILABILITY);
 
     /// Event called when player gets fined.
     ///
@@ -78,10 +105,12 @@ pub mod events {
     pub const PLAYER_USE_TRAIN: GameplayEventId =
         GameplayEventId::new(c"player.use.train", GAMEPLAY_AVAILABILITY);
 
-    /// Every public gameplay event in SDK 1.14 header order.
+    /// Every public gameplay event in SDK 1.16 header order.
     pub const ALL: [GameplayEventId; COUNT] = [
         JOB_CANCELLED,
+        CAR_JOB_CANCELLED,
         JOB_DELIVERED,
+        CAR_JOB_DELIVERED,
         PLAYER_FINED,
         PLAYER_TOLLGATE_PAID,
         PLAYER_USE_FERRY,
@@ -91,11 +120,11 @@ pub mod events {
 
 /// Typed attributes carried by gameplay events.
 pub mod attributes {
-    use super::GAMEPLAY_AVAILABILITY;
+    use super::{CAR_JOB_AVAILABILITY, GAMEPLAY_AVAILABILITY};
     use crate::{AnyAttribute, Attribute};
 
     /// Number of official gameplay attributes.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     /// The penalty for cancelling the job in native game currency. (Can be 0)
     ///
@@ -117,6 +146,15 @@ pub mod attributes {
     ///
     /// Type: float
     pub const CARGO_DAMAGE: Attribute<f32> = Attribute::new(c"cargo.damage", GAMEPLAY_AVAILABILITY);
+
+    /// Total vehicle damage. (Range <0.0, 1.0>)
+    ///
+    /// Carried by `car_job.delivered`. Introduced by ATS telemetry schema
+    /// 1.07; no ETS2 schema declares it.
+    ///
+    /// Type: float
+    pub const VEHICLE_DAMAGE: Attribute<f32> =
+        Attribute::new(c"vehicle.damage", CAR_JOB_AVAILABILITY);
 
     /// The real distance in km on the job.
     ///
@@ -197,7 +235,7 @@ pub mod attributes {
     pub const TARGET_ID: Attribute<crate::StringValue> =
         Attribute::new(c"target.id", GAMEPLAY_AVAILABILITY);
 
-    /// Every public gameplay-event attribute from the SDK 1.14 header.
+    /// Every public gameplay-event attribute from the SDK 1.16 header.
     ///
     /// This heterogeneous catalog is intended for enumeration and coverage
     /// checks. Individual typed constants remain the decoding API.
@@ -206,6 +244,7 @@ pub mod attributes {
         REVENUE.erase(),
         EARNED_XP.erase(),
         CARGO_DAMAGE.erase(),
+        VEHICLE_DAMAGE.erase(),
         DISTANCE_KM.erase(),
         DELIVERY_TIME.erase(),
         AUTO_PARK_USED.erase(),
@@ -227,13 +266,13 @@ pub mod attributes {
 /// attributes shared by ferry and train events, in an enumerable form suitable
 /// for diagnostics and schema generation.
 pub mod associations {
-    use super::{GAMEPLAY_AVAILABILITY, attributes, events};
+    use super::{CAR_JOB_AVAILABILITY, GAMEPLAY_AVAILABILITY, attributes, events};
     use crate::{
         Attribute, GameSchemaAvailability, GameplayAttributeAssociation, GameplayEventId, SdkValue,
     };
 
     /// Total number of gameplay-event to attribute relationships.
-    pub const COUNT: usize = 21;
+    pub const COUNT: usize = 28;
 
     const fn association<T: SdkValue>(
         event: GameplayEventId,
@@ -248,6 +287,16 @@ pub mod associations {
         events::JOB_CANCELLED,
         attributes::CANCEL_PENALTY,
         GAMEPLAY_AVAILABILITY,
+    )];
+
+    /// Payload schema for `car_job.cancelled`.
+    ///
+    /// The shared `cancel.penalty` descriptor keeps its own gameplay history;
+    /// this relationship exists only from ATS schema 1.07.
+    pub const CAR_JOB_CANCELLED: [GameplayAttributeAssociation; 1] = [association(
+        events::CAR_JOB_CANCELLED,
+        attributes::CANCEL_PENALTY,
+        CAR_JOB_AVAILABILITY,
     )];
 
     /// Payload schema for `job.delivered`.
@@ -286,6 +335,43 @@ pub mod associations {
             events::JOB_DELIVERED,
             attributes::AUTO_LOAD_USED,
             GAMEPLAY_AVAILABILITY,
+        ),
+    ];
+
+    /// Payload schema for `car_job.delivered`, in documented order.
+    ///
+    /// Shared payload descriptors keep their own gameplay history; these
+    /// relationships exist only from ATS schema 1.07.
+    pub const CAR_JOB_DELIVERED: [GameplayAttributeAssociation; 6] = [
+        association(
+            events::CAR_JOB_DELIVERED,
+            attributes::REVENUE,
+            CAR_JOB_AVAILABILITY,
+        ),
+        association(
+            events::CAR_JOB_DELIVERED,
+            attributes::EARNED_XP,
+            CAR_JOB_AVAILABILITY,
+        ),
+        association(
+            events::CAR_JOB_DELIVERED,
+            attributes::CARGO_DAMAGE,
+            CAR_JOB_AVAILABILITY,
+        ),
+        association(
+            events::CAR_JOB_DELIVERED,
+            attributes::VEHICLE_DAMAGE,
+            CAR_JOB_AVAILABILITY,
+        ),
+        association(
+            events::CAR_JOB_DELIVERED,
+            attributes::DISTANCE_KM,
+            CAR_JOB_AVAILABILITY,
+        ),
+        association(
+            events::CAR_JOB_DELIVERED,
+            attributes::DELIVERY_TIME,
+            CAR_JOB_AVAILABILITY,
         ),
     ];
 
@@ -372,6 +458,7 @@ pub mod associations {
     /// order, preserving each event's documented payload order.
     pub const ALL: [GameplayAttributeAssociation; COUNT] = [
         JOB_CANCELLED[0],
+        CAR_JOB_CANCELLED[0],
         JOB_DELIVERED[0],
         JOB_DELIVERED[1],
         JOB_DELIVERED[2],
@@ -379,6 +466,12 @@ pub mod associations {
         JOB_DELIVERED[4],
         JOB_DELIVERED[5],
         JOB_DELIVERED[6],
+        CAR_JOB_DELIVERED[0],
+        CAR_JOB_DELIVERED[1],
+        CAR_JOB_DELIVERED[2],
+        CAR_JOB_DELIVERED[3],
+        CAR_JOB_DELIVERED[4],
+        CAR_JOB_DELIVERED[5],
         PLAYER_FINED[0],
         PLAYER_FINED[1],
         PLAYER_TOLLGATE_PAID[0],
@@ -415,7 +508,7 @@ pub enum FineOffence {
 }
 
 impl FineOffence {
-    /// Number of fine-offence strings documented by SDK 1.14.
+    /// Number of fine-offence strings documented by SDK 1.16.
     pub const COUNT: usize = 14;
 
     /// Every documented fine-offence value in header order.
@@ -536,9 +629,9 @@ impl FromStr for FineOffence {
     }
 }
 
-const _: [(); 6] = [(); events::COUNT];
-const _: [(); 15] = [(); attributes::COUNT];
-const _: [(); 21] = [(); associations::COUNT];
+const _: [(); 8] = [(); events::COUNT];
+const _: [(); 16] = [(); attributes::COUNT];
+const _: [(); 28] = [(); associations::COUNT];
 const _: [(); 14] = [(); FineOffence::COUNT];
 
 #[cfg(test)]
@@ -549,11 +642,13 @@ mod tests {
     fn typed_catalog_counts_match_the_raw_sdk_catalog() {
         assert_eq!(events::COUNT, crate::sys::gameplay::events::COUNT);
         assert_eq!(attributes::COUNT, crate::sys::gameplay::attributes::COUNT);
-        assert_eq!(events::COUNT, 6);
-        assert_eq!(attributes::COUNT, 15);
-        assert_eq!(associations::COUNT, 21);
+        assert_eq!(events::COUNT, 8);
+        assert_eq!(attributes::COUNT, 16);
+        assert_eq!(associations::COUNT, 28);
         assert_eq!(associations::JOB_CANCELLED.len(), 1);
+        assert_eq!(associations::CAR_JOB_CANCELLED.len(), 1);
         assert_eq!(associations::JOB_DELIVERED.len(), 7);
+        assert_eq!(associations::CAR_JOB_DELIVERED.len(), 6);
         assert_eq!(associations::PLAYER_FINED.len(), 2);
         assert_eq!(associations::PLAYER_TOLLGATE_PAID.len(), 1);
         assert_eq!(associations::PLAYER_USE_FERRY.len(), 5);
@@ -565,7 +660,11 @@ mod tests {
         for association in associations::ALL {
             assert!(events::ALL.contains(&association.event()));
             assert!(attributes::ALL.contains(&association.attribute()));
-            assert_eq!(association.availability(), GAMEPLAY_AVAILABILITY);
+            // A relationship shares the schema history of its event.
+            assert_eq!(
+                association.availability(),
+                association.event().availability()
+            );
         }
 
         for event in events::ALL {
@@ -604,11 +703,13 @@ mod tests {
     fn gameplay_association_catalog_preserves_event_and_payload_order() {
         let groups = [
             (events::JOB_CANCELLED, 0..1),
-            (events::JOB_DELIVERED, 1..8),
-            (events::PLAYER_FINED, 8..10),
-            (events::PLAYER_TOLLGATE_PAID, 10..11),
-            (events::PLAYER_USE_FERRY, 11..16),
-            (events::PLAYER_USE_TRAIN, 16..21),
+            (events::CAR_JOB_CANCELLED, 1..2),
+            (events::JOB_DELIVERED, 2..9),
+            (events::CAR_JOB_DELIVERED, 9..15),
+            (events::PLAYER_FINED, 15..17),
+            (events::PLAYER_TOLLGATE_PAID, 17..18),
+            (events::PLAYER_USE_FERRY, 18..23),
+            (events::PLAYER_USE_TRAIN, 23..28),
         ];
 
         for (event, range) in groups {
@@ -629,6 +730,17 @@ mod tests {
                 attributes::DELIVERY_TIME.erase(),
                 attributes::AUTO_PARK_USED.erase(),
                 attributes::AUTO_LOAD_USED.erase(),
+            ]
+        );
+        assert_eq!(
+            associations::CAR_JOB_DELIVERED.map(crate::GameplayAttributeAssociation::attribute),
+            [
+                attributes::REVENUE.erase(),
+                attributes::EARNED_XP.erase(),
+                attributes::CARGO_DAMAGE.erase(),
+                attributes::VEHICLE_DAMAGE.erase(),
+                attributes::DISTANCE_KM.erase(),
+                attributes::DELIVERY_TIME.erase(),
             ]
         );
         assert_eq!(
@@ -680,7 +792,11 @@ mod tests {
 
     #[test]
     fn gameplay_descriptors_share_the_official_introduction_schema() {
+        let car_job_events = [events::CAR_JOB_CANCELLED, events::CAR_JOB_DELIVERED];
         for event in events::ALL {
+            if car_job_events.contains(&event) {
+                continue;
+            }
             assert_eq!(
                 event.availability().available_since_ets2(),
                 Some(game::ets2::V1_14)
@@ -691,6 +807,9 @@ mod tests {
             );
         }
         for attribute in attributes::ALL {
+            if attribute == attributes::VEHICLE_DAMAGE.erase() {
+                continue;
+            }
             assert_eq!(
                 attribute.availability().available_since_ets2(),
                 Some(game::ets2::V1_14)
@@ -700,6 +819,29 @@ mod tests {
                 Some(game::ats::V1_01)
             );
         }
+    }
+
+    #[test]
+    fn car_job_gameplay_descriptors_are_ats_only_from_1_07() {
+        let car_job = GameSchemaAvailability::new(None, Some(game::ats::V1_07));
+        assert_eq!(events::CAR_JOB_CANCELLED.name(), c"car_job.cancelled");
+        assert_eq!(events::CAR_JOB_DELIVERED.name(), c"car_job.delivered");
+        assert_eq!(events::CAR_JOB_CANCELLED.availability(), car_job);
+        assert_eq!(events::CAR_JOB_DELIVERED.availability(), car_job);
+
+        assert_eq!(attributes::VEHICLE_DAMAGE.name(), c"vehicle.damage");
+        assert_eq!(
+            attributes::VEHICLE_DAMAGE.value_type(),
+            crate::sys::SCS_VALUE_TYPE_FLOAT
+        );
+        assert_eq!(attributes::VEHICLE_DAMAGE.availability(), car_job);
+
+        // Shared payload attributes keep their original gameplay history.
+        assert_eq!(attributes::REVENUE.availability(), GAMEPLAY_AVAILABILITY);
+        assert_eq!(
+            attributes::CANCEL_PENALTY.availability(),
+            GAMEPLAY_AVAILABILITY
+        );
     }
 
     #[test]

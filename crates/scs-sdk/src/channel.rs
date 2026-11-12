@@ -332,7 +332,7 @@ impl SdkCall<'_> {
     }
 }
 
-/// Complete typed channel catalog for SCS Telemetry SDK 1.14.
+/// Complete typed channel catalog for SCS Telemetry SDK 1.16.
 pub mod channels {
     use super::AnyChannel;
     use crate::{GameSchemaAvailability, game};
@@ -364,6 +364,11 @@ pub mod channels {
         GameSchemaAvailability::new(Some(game::ets2::V1_17), Some(game::ats::V1_04));
     const ETS2_1_18_ATS_1_05: GameSchemaAvailability =
         GameSchemaAvailability::new(Some(game::ets2::V1_18), Some(game::ats::V1_05));
+    // Introduction, not delivery: SCS documents that ETS2 1.19 and ATS 1.06
+    // declared the mandatory-break channel without providing it, and that
+    // ETS2 1.21 and ATS 1.08 fixed delivery.
+    const ETS2_1_19_ATS_1_06: GameSchemaAvailability =
+        GameSchemaAvailability::new(Some(game::ets2::V1_19), Some(game::ats::V1_06));
 
     /// First schema which supports the numbered `trailer.[index].*` namespace.
     ///
@@ -376,10 +381,10 @@ pub mod channels {
     /// Channels declared by `scssdk_telemetry_common_channels.h`.
     pub mod common {
         use super::super::{AnyChannel, Channel};
-        use super::{ETS2_1_09_ATS_1_00, ETS2_1_18_ATS_1_05, INITIAL};
+        use super::{ETS2_1_09_ATS_1_00, ETS2_1_18_ATS_1_05, ETS2_1_19_ATS_1_06, INITIAL};
 
         /// Number of typed descriptors in this catalog group.
-        pub const COUNT: usize = 4;
+        pub const COUNT: usize = 5;
 
         /// Scale applied to distance and time to compensate
         /// for the scale of the map (e.g. 1s of real time corresponds to `local_scale`
@@ -415,7 +420,7 @@ pub mod channels {
 
         /// Time until next rest stop.
         ///
-        /// When the fatique simulation is disabled, the behavior of this channel
+        /// When the fatigue simulation is disabled, the behavior of this channel
         /// is implementation dependent. The game might provide the value which would
         /// apply if it was enabled or provide no value at all.
         ///
@@ -424,7 +429,26 @@ pub mod channels {
         /// Type: s32
         pub const NEXT_REST_STOP: Channel<i32> = Channel::new(c"rest.stop", ETS2_1_09_ATS_1_00);
 
-        /// Every common channel in the order used by the SDK 1.14 header.
+        /// Time until the next required mandatory break.
+        ///
+        /// When the mandatory break simulation is disabled, the behavior of
+        /// this channel is implementation dependent. The game might provide
+        /// the value which would apply if it was enabled or provide no value
+        /// at all.
+        ///
+        /// Represented in in-game minutes.
+        ///
+        /// Availability records the schema which introduced the descriptor:
+        /// ETS2 1.19 and ATS 1.06. SCS documents that those schemas did not
+        /// actually provide the channel; delivery was fixed in ETS2 1.21 and
+        /// ATS 1.08. Subscribe with an optional registration when the plugin
+        /// must also run on the intermediate schemas.
+        ///
+        /// Type: s32
+        pub const NEXT_MANDATORY_BREAK: Channel<i32> =
+            Channel::new(c"mandatory.break", ETS2_1_19_ATS_1_06);
+
+        /// Every common channel in the order used by the SDK 1.16 header.
         ///
         /// The marker types are erased only so callers can enumerate mixed
         /// channel types. Each entry still retains its exact value type and
@@ -434,6 +458,7 @@ pub mod channels {
             GAME_TIME.erase(),
             MULTIPLAYER_TIME_OFFSET.erase(),
             NEXT_REST_STOP.erase(),
+            NEXT_MANDATORY_BREAK.erase(),
         ];
     }
 
@@ -1030,7 +1055,7 @@ pub mod channels {
         pub const WHEEL_LIFT_OFFSET: Channel<f32> =
             Channel::indexed(c"truck.wheel.lift.offset", ETS2_1_10_ATS_1_00);
 
-        /// Every truck channel in the order used by the SDK 1.14 header.
+        /// Every truck channel in the order used by the SDK 1.16 header.
         ///
         /// Indexed wheel and H-shifter entries keep `is_indexed() == true`;
         /// the array itself never supplies or guesses a runtime index.
@@ -1289,7 +1314,7 @@ pub mod channels {
         pub const WHEEL_LIFT_OFFSET: Channel<f32> =
             Channel::indexed(c"trailer.wheel.lift.offset", ETS2_1_14_ATS_1_01);
 
-        /// Every first-trailer channel in SDK 1.14 header order.
+        /// Every first-trailer channel in SDK 1.16 header order.
         ///
         /// These canonical names use the backward-compatible `trailer.*`
         /// form. Multi-trailer subscription remains an explicit framework
@@ -1331,14 +1356,14 @@ pub mod channels {
         pub const CARGO_DAMAGE: Channel<f32> =
             Channel::new(c"job.cargo.damage", ETS2_1_14_ATS_1_01);
 
-        /// Every job channel in SDK 1.14 header order.
+        /// Every job channel in SDK 1.16 header order.
         pub const ALL: [AnyChannel; COUNT] = [CARGO_DAMAGE.erase()];
     }
 
     /// Total number of typed descriptors in the catalog.
     pub const COUNT: usize = common::COUNT + truck::COUNT + trailer::COUNT + job::COUNT;
 
-    /// Every public telemetry channel from the SDK 1.14 header bundle.
+    /// Every public telemetry channel from the SDK 1.16 header bundle.
     ///
     /// Entries follow header grouping and declaration order: common, truck,
     /// trailer, then job. The catalog is descriptive only. Merely iterating it
@@ -1350,6 +1375,7 @@ pub mod channels {
         common::GAME_TIME.erase(),
         common::MULTIPLAYER_TIME_OFFSET.erase(),
         common::NEXT_REST_STOP.erase(),
+        common::NEXT_MANDATORY_BREAK.erase(),
         truck::WORLD_PLACEMENT.erase(),
         truck::LOCAL_LINEAR_VELOCITY.erase(),
         truck::LOCAL_ANGULAR_VELOCITY.erase(),
@@ -1465,7 +1491,7 @@ pub mod channels {
         WORLD_PLACEMENT as TRUCK_WORLD_PLACEMENT,
     };
 
-    const _: [(); 107] = [(); COUNT];
+    const _: [(); 108] = [(); COUNT];
 }
 
 #[cfg(test)]
@@ -1532,7 +1558,7 @@ mod tests {
         assert_eq!(channels::trailer::COUNT, sys::channels::trailer::COUNT);
         assert_eq!(channels::job::COUNT, sys::channels::job::COUNT);
         assert_eq!(channels::COUNT, sys::channels::COUNT);
-        assert_eq!(channels::COUNT, 107);
+        assert_eq!(channels::COUNT, 108);
     }
 
     #[test]
@@ -1724,6 +1750,18 @@ mod tests {
             Some(crate::game::ets2::V1_18),
             Some(crate::game::ats::V1_05),
         );
+        // Introduction schemas; delivery was fixed in ETS2 1.21 and ATS 1.08.
+        assert_since(
+            common::NEXT_MANDATORY_BREAK,
+            Some(crate::game::ets2::V1_19),
+            Some(crate::game::ats::V1_06),
+        );
+        assert_eq!(common::NEXT_MANDATORY_BREAK.name(), c"mandatory.break");
+        assert_eq!(
+            common::NEXT_MANDATORY_BREAK.erase().value_type(),
+            ValueType::I32
+        );
+        assert!(!common::NEXT_MANDATORY_BREAK.erase().is_indexed());
 
         assert_eq!(
             channels::MULTI_TRAILER_AVAILABILITY,
