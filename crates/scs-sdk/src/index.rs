@@ -49,7 +49,7 @@ impl fmt::Display for SdkIndex {
 
 /// Zero-based trailer number embedded in a multi-trailer name.
 ///
-/// SCS SDK 1.14 defines ten numbered trailer configurations and channel
+/// SCS SDK 1.16 defines ten numbered trailer configurations and channel
 /// namespaces, `trailer.0` through `trailer.9`. Construction validates that
 /// fixed header boundary once, so framework APIs accepting this type do not
 /// repeat range checks or expose an invalid trailer identity.
@@ -78,7 +78,7 @@ impl TrailerIndex {
         Self(9),
     ];
 
-    /// Creates a trailer index when `raw` is within the SDK 1.14 range.
+    /// Creates a trailer index when `raw` is within the SDK 1.16 range.
     #[must_use]
     pub fn new(raw: u32) -> Option<Self> {
         // The official count is small and fixed by the vendored header. Using

@@ -4,14 +4,14 @@
 
 **Build native SCS telemetry and input-device plugins in safe, typed Rust.**
 
-Complete public Telemetry and Input SDK 1.14 coverage · audited FFI and lifecycle boundaries · verified Windows, Linux, and macOS artifacts
+Complete public Telemetry and Input SDK 1.16 coverage · audited FFI and lifecycle boundaries · verified Windows, Linux, and macOS artifacts
 
 **English** · [简体中文](README.zh.md)
 
 </div>
 
 `scs-sdk-crates` is a reusable Rust foundation for the public telemetry and
-input-device interfaces in **SCS SDK 1.14**. It turns the official C ABI into
+input-device interfaces in **SCS SDK 1.16**. It turns the official C ABI into
 typed `no_std` bindings, adds safe API-specific plugin runtimes, and provides
 real plugin examples that prove the application boundary and final artifacts.
 
@@ -21,25 +21,25 @@ or C++ shim, CMake, bindgen, raw pointers, handwritten exports, or application
 
 > [!IMPORTANT]
 > This repository covers the complete public **Telemetry API 1.00/1.01** and
-> **Input API 1.00** interfaces present in SCS SDK 1.14. Coverage claims remain
+> **Input API 1.00** interfaces present in SCS SDK 1.16. Coverage claims remain
 > scoped to those audited public interfaces rather than unspecified future SDK
 > additions.
 
 > [!NOTE]
 > This is an independent community project and is not affiliated with or
 > endorsed by SCS Software. The official files under
-> [`third-party/scs_sdk_1_14/`](third-party/scs_sdk_1_14/) remain the ABI and
+> [`third-party/scs_sdk_1_16/`](third-party/scs_sdk_1_16/) remain the ABI and
 > constant source of truth. See [Third-Party Notices](THIRD_PARTY_NOTICES.md).
 
 ## Why this workspace exists
 
 | Need | What this repository provides |
 | --- | --- |
-| Auditable SDK coverage | Header-ordered raw catalogs and typed catalogs for all 107 channels, 6 configuration IDs, 60 configuration attributes, 6 gameplay events, and 15 gameplay attributes. |
+| Auditable SDK coverage | Header-ordered raw catalogs and typed catalogs for all 108 channels, 8 configuration IDs, 64 configuration attributes, 8 gameplay events, and 16 gameplay attributes. |
 | Safe application code | Independent `TelemetryPlugin` and `InputPlugin` APIs with typed values, indices, game identity, compatibility, and explicit registration. |
 | Shared runtime correctness | Telemetry transactions plus Input device lifetime handling, panic containment, stable callback contexts, poison recovery, and stale-callback isolation. |
 | Honest artifact proof | Release scripts inspect PE, ELF, and Mach-O format, x86-64 architecture, and the exact API-specific export set after linking and stripping. |
-| Real game evidence | A safe example runs in ETS2 with six event classes and eight channels; a separate probe verifies the loader's documented API fallback sequence. |
+| Real game evidence | A safe example runs in ETS2 and ATS with six event classes and eight required plus one optional channel; a separate probe verifies the loader's documented API fallback sequence. |
 
 The result is deliberately a foundation rather than a product plugin. Web
 bridges, dispatch logic, persistence, save-game handling, and user interfaces
@@ -118,19 +118,31 @@ Its startup sequence reports framework identity, negotiated versions, detected
 game identity, and committed subscriptions:
 
 ```text
-[scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" version="0.1.0" framework_version="0.1.0"
-[scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.60.1.7s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.19
-[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.0" events=6 channels=8
+[scs-sdk-plugin] starting plugin name="SCS SDK Telemetry Example" version="0.1.1" framework_version="0.1.1"
+[scs-sdk-plugin] detected game_display_name="Euro Truck Simulator 2 1.62.2.1001s" game_id="eut2" telemetry_api=1.1 telemetry_schema=1.22
+[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.1" events=6 channels=9
 ```
 
-During gameplay it decodes typed snapshots, job configuration, and all six SDK
-1.14 gameplay payload shapes. One representative snapshot looks like this:
+The same build in American Truck Simulator:
 
 ```text
-[scs-sdk-example] probe speed=85.3km/h rpm=1485 gear=16 \
-position=(27077.895,2.983,-8572.040) heading=0.7134 \
-navigation_distance=705.64km navigation_time=39887s \
-speed_limit=80.0km/h cargo_damage=0.000
+[scs-sdk-plugin] detected game_display_name="American Truck Simulator 1.62.2.1000s" game_id="ats" telemetry_api=1.1 telemetry_schema=1.8
+[scs-sdk-plugin] initialized plugin name="SCS SDK Telemetry Example" version="0.1.1" events=6 channels=9
+```
+
+ETS2 1.62 reports schema 1.22, newer than the 1.21 declared by the SDK 1.16
+headers; the framework accepts it inside the declared major family and still
+registers every SDK 1.16 capability.
+
+During gameplay it decodes typed snapshots, job and car-job configuration, and
+all eight SDK 1.16 gameplay payload shapes. One representative ETS2 1.62
+snapshot looks like this:
+
+```text
+[scs-sdk-example] probe speed=82.0km/h rpm=1176 gear=14 \
+position=(-53829.995,9.757,-102917.080) heading=0.3118 \
+navigation_distance=466.65km navigation_time=24253s \
+speed_limit=90.0km/h cargo_damage=0.000 mandatory_break=630min
 ```
 
 The separate
@@ -176,7 +188,7 @@ scs-sdk-sys ← scs-sdk ← scs-sdk-plugin ← application
                                      ↖ scs-sdk-plugin-macros
 ```
 
-## Typed coverage of Telemetry SDK 1.14
+## Typed coverage of Telemetry SDK 1.16
 
 The inventory is derived from the official headers and checked for names,
 counts, ordering, duplicates, value types, associations, and indexed/scalar
@@ -184,20 +196,21 @@ behavior.
 
 | Surface | Count | Typed entry point |
 | --- | ---: | --- |
-| Channels | **107** | `channels::ALL` |
-| Configuration IDs | **6** | `configuration::ids::ALL` |
-| Configuration attributes | **60** | `configuration::attributes::ALL` |
-| Configuration associations | **71** | `configuration::associations::ALL` |
-| Gameplay events | **6** | `gameplay::events::ALL` |
-| Gameplay attributes | **15** | `gameplay::attributes::ALL` |
-| Gameplay associations | **21** | `gameplay::associations::ALL` |
+| Channels | **108** | `channels::ALL` |
+| Configuration IDs | **8** | `configuration::ids::ALL` |
+| Configuration attributes | **64** | `configuration::attributes::ALL` |
+| Configuration associations | **89** | `configuration::associations::ALL` |
+| Gameplay events | **8** | `gameplay::events::ALL` |
+| Gameplay attributes | **16** | `gameplay::attributes::ALL` |
+| Gameplay associations | **28** | `gameplay::associations::ALL` |
 | H-shifter values | **4** | `ShifterType::ALL` |
 | Job-market values | **5** | `JobMarket::ALL` |
+| Car-job-market values | **2** | `CarJobMarket::ALL` |
 | Fine-offence values | **14** | `FineOffence::ALL` |
 
 Coverage also includes every public telemetry ABI value type, result code,
 delivery flag, initialization structure, callback payload, game ID, Telemetry
-API version, and ETS2/ATS telemetry game-version constant in SDK 1.14.
+API version, and ETS2/ATS telemetry game-version constant in SDK 1.16.
 
 Typed access does not erase future data. Known enum-like strings have closed
 catalogs with `ALL`, `COUNT`, `as_str`, `FromStr`, and schema availability,
@@ -253,7 +266,7 @@ class without mixing that behavior into the generic artifact.
 
 Capability history is also explicit. Every descriptor and association carries
 independently researched ETS2 and ATS schema minima from the official SDK 1.0
-through 1.14 headers. API-level requirements—such as Telemetry API 1.01 for
+through 1.16 headers. API-level requirements—such as Telemetry API 1.01 for
 gameplay events and signed 64-bit values—remain separate from per-game schema
 availability.
 
@@ -398,8 +411,8 @@ examples/telemetry-plugin/      real safe application-boundary plugin
 examples/telemetry-fallback-plugin/
                                 manual loader fallback E2E probe
 scripts/                        boundary, build, install, and artifact checks
-third-party/scs_sdk_1_14/       official SDK 1.14 distribution
-third-party/scs_sdk_history/    official SDK 1.0–1.14 history and notices
+third-party/scs_sdk_1_16/       official SDK 1.16 distribution
+third-party/scs_sdk_history/    official SDK 1.0–1.16 history and notices
 ```
 
 | Read next | Use it for |
@@ -455,7 +468,7 @@ Workspace-authored Rust code is available under either
 Official SDK files and SCS-derived ABI declarations, constants, identifiers,
 catalogs, schema-history metadata, and related documentation retain SCS
 Software's notices. SDK 1.0–1.5 use
-[the 2013 notice](LICENSE-SCS-SDK-2013), while SDK 1.6–1.14 use
+[the 2013 notice](LICENSE-SCS-SDK-2013), while SDK 1.6–1.16 use
 [the 2016 notice](LICENSE-SCS-SDK-2016). These materials are not relicensed
 under the workspace license.
 

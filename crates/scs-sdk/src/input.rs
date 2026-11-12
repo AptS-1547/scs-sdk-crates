@@ -578,7 +578,7 @@ impl InputInitCall<'_> {
     }
 }
 
-/// Input API game-version constants declared by the SDK 1.14 headers.
+/// Input API game-version constants declared by the SDK 1.16 headers.
 pub mod game {
     use crate::{InputGameVersion, sys};
 

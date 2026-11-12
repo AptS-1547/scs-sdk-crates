@@ -3,17 +3,17 @@
 [中文](README.zh.md) | **English**
 
 `scs-sdk-sys` is the dependency-free, `no_std`, handwritten raw ABI layer for
-the public telemetry and input interfaces in **SCS SDK 1.14** on 64-bit game processes. It
+the public telemetry and input interfaces in **SCS SDK 1.16** on 64-bit game processes. It
 mirrors the C declarations used by Euro Truck Simulator 2 and American Truck
 Simulator without adding wrapper policy, plugin lifecycle, or product logic.
 
 The authoritative source is the official header distribution preserved under
-[`third-party/scs_sdk_1_14/`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/third-party/scs_sdk_1_14). Rust definitions
+[`third-party/scs_sdk_1_16/`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/third-party/scs_sdk_1_16). Rust definitions
 are reviewed against those files for layout, numeric values, function
 signatures, calling conventions, and NUL-terminated byte constants.
 
 > This crate covers the public Telemetry API 1.00/1.01 and Input API 1.00
-> declarations present in SDK 1.14.
+> declarations present in SDK 1.16.
 
 This is an independent community crate and is not affiliated with or endorsed
 by SCS Software.
@@ -45,15 +45,15 @@ by SCS Software.
 | `gameplay` | Gameplay event IDs and attribute constants. |
 | `games` | Official ETS2 and ATS identifiers and version constants. |
 
-The raw SDK 1.14 telemetry inventory is:
+The raw SDK 1.16 telemetry inventory is:
 
 | Surface | Count |
 | --- | ---: |
-| Channels | 107 |
-| Configuration IDs | 6 |
-| Configuration attributes | 60 |
-| Gameplay event IDs | 6 |
-| Gameplay attributes | 15 |
+| Channels | 108 |
+| Configuration IDs | 8 |
+| Configuration attributes | 64 |
+| Gameplay event IDs | 8 |
+| Gameplay attributes | 16 |
 
 The raw Input API inventory additionally covers two device classes, two value
 types, two callback flags, the 400-input limit, the v1.00 init layout, and both
@@ -102,6 +102,12 @@ cargo clippy --locked -p scs-sdk-sys --all-targets -- -D warnings
 RUSTDOCFLAGS=-Dwarnings cargo doc --locked -p scs-sdk-sys --no-deps
 ```
 
+`cargo test -p scs-sdk-sys` includes `tests/header_coverage.rs`, which parses
+the vendored `third-party/scs_sdk_1_16/include` headers and requires every
+string macro and game-version macro to appear in the matching raw catalog, in
+official header order, with no extra names. The test reads workspace-only
+third-party files, so it is excluded from the published package.
+
 Changes to ABI layout, padding, unions, catalogs, or version constants must also
 exercise the safe interpretation layer:
 
@@ -120,9 +126,9 @@ Workspace-authored Rust code is available under either
 [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
 ABI declarations, constants, identifiers, catalogs, schema-history metadata,
-and related documentation derived from SDK 1.0 through 1.14 retain both
+and related documentation derived from SDK 1.0 through 1.16 retain both
 original SCS Software notices: [LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)
 for SDK 1.0-1.5 and [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK
-1.6-1.14. The
-[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+1.6-1.16. The
+[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip)
 remains third-party material and is not relicensed under the workspace license.

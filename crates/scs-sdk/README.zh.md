@@ -3,7 +3,7 @@
 **中文** | [English](README.md)
 
 `scs-sdk` 是建立在 [`scs-sdk-sys`](https://crates.io/crates/scs-sdk-sys) 之上的安全、typed、
-`no_std` **SCS SDK 1.14** 公开 telemetry 与 input 接口解释层。它把 header 形状的 ABI
+`no_std` **SCS SDK 1.16** 公开 telemetry 与 input 接口解释层。它把 header 形状的 ABI
 转换为 typed Rust value、descriptor、catalog、版本域和 callback scope 内的 SDK
 操作，但不接管插件生命周期或产品状态。
 
@@ -103,13 +103,13 @@ use scs_sdk::{Attribute, Channel};
 
 | 接口面 | 数量 |
 | --- | ---: |
-| Channels | 107 |
-| Configuration IDs | 6 |
-| Configuration attributes | 60 |
-| Configuration-to-attribute associations | 71 |
-| Gameplay events | 6 |
-| Gameplay attributes | 15 |
-| Gameplay-to-attribute associations | 21 |
+| Channels | 108 |
+| Configuration IDs | 8 |
+| Configuration attributes | 64 |
+| Configuration-to-attribute associations | 89 |
+| Gameplay events | 8 |
+| Gameplay attributes | 16 |
+| Gameplay-to-attribute associations | 28 |
 
 文档化的 enum-like string 也有 closed known-value catalog：
 
@@ -117,6 +117,7 @@ use scs_sdk::{Attribute, Channel};
 | --- | ---: |
 | `configuration::ShifterType` | 4 |
 | `configuration::JobMarket` | 5 |
+| `configuration::CarJobMarket` | 2 |
 | `gameplay::FineOffence` | 14 |
 
 每个 closed catalog 都暴露 `ALL`、`COUNT`、`as_str`、`FromStr` 与 per-value
@@ -171,9 +172,9 @@ scripts/check-plugin-boundary.sh
 Workspace 自有 Rust 代码可由你选择使用
 [Apache License 2.0](LICENSE-APACHE) 或 [MIT](LICENSE-MIT)。
 
-来源于 SDK 1.0 到 1.14 的 typed descriptor、常量、标识符、catalog、
+来源于 SDK 1.0 到 1.16 的 typed descriptor、常量、标识符、catalog、
 schema-history 元数据与相关文档保留两份原始 SCS Software 声明：SDK 1.0-1.5 见
-[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.14 见
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.16 见
 [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016)。
-[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip)
 仍是第三方材料，不会被重新许可为 workspace license。

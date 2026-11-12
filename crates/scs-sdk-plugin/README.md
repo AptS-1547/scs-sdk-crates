@@ -228,9 +228,9 @@ Workspace-authored Rust code is available under either
 [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
 SCS-facing lifecycle contracts, ABI identifiers, compatibility metadata, and
-related documentation derived from SDK 1.0 through 1.14 retain both original
+related documentation derived from SDK 1.0 through 1.16 retain both original
 SCS Software notices: [LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013) for SDK
-1.0-1.5 and [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK 1.6-1.14.
+1.0-1.5 and [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK 1.6-1.16.
 The
-[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip)
 remains third-party material and is not relicensed under the workspace license.

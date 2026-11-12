@@ -14,7 +14,7 @@ event callback 和一个 typed channel callback。
 官方 loader 会从新到旧尝试 API 版本，并且只在 `scs_telemetry_init` 返回
 `SCS_RESULT_unsupported` 时继续尝试。
 
-对于 SDK 1.14 中两个已经审计的 telemetry API，该 fixture 预期：
+对于 SDK 1.16 中两个已经审计的 telemetry API，该 fixture 预期：
 
 | Attempt | 产品结果 | 预期 loader 行为 |
 | --- | --- | --- |
@@ -244,7 +244,7 @@ delivery 证据。
 ## 许可证
 
 workspace 自编 Rust 代码使用 **MIT OR Apache-2.0**。SCS SDK 1.0-1.5 的归属
-声明保存在 [`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013)，SDK 1.6-1.14
+声明保存在 [`LICENSE-SCS-SDK-2013`](../../LICENSE-SCS-SDK-2013)，SDK 1.6-1.16
 的归属声明保存在 [`LICENSE-SCS-SDK-2016`](../../LICENSE-SCS-SDK-2016)。完整说明见
 仓库[第三方声明](../../THIRD_PARTY_NOTICES.zh.md)。本示例是独立社区项目，与
 SCS Software 不存在隶属或官方背书关系。

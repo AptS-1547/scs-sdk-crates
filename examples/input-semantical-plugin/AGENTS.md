@@ -6,7 +6,7 @@ scs-sdk-input-semantical-example package.
 ## Purpose
 
 - Provide an isolated real-game fixture for `InputDeviceType::Semantical`.
-- Preserve the official SDK 1.14 sample's `light` bool input name so the event
+- Preserve the official SDK 1.16 sample's `light` bool input name so the event
   maps directly to the `semantical.light?0` mix in a fresh controls file.
 - Keep the fixture deterministic, self-contained, and independent from the
   generic binding example.

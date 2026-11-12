@@ -9,7 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/scs-sdk-sys"
 readme = "README.md"
-exclude = ["AGENTS.md"]
+# The header coverage audit reads workspace-only vendored SDK headers.
+exclude = ["AGENTS.md", "tests/header_coverage.rs"]
 
 [lib]
 path = "src/lib.rs"

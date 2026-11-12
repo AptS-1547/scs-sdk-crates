@@ -117,7 +117,7 @@ impl fmt::Display for InputApiVersion {
 
 /// Game-specific version supplied while initializing the input API.
 ///
-/// SDK 1.14 declares input game version 1.00 for both ETS2 and ATS. This type
+/// SDK 1.14 through 1.16 declare input game version 1.00 for both ETS2 and ATS. This type
 /// remains distinct from telemetry [`GameSchemaVersion`] because SCS versions
 /// each API's game-facing contract independently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

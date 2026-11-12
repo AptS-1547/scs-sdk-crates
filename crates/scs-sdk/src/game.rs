@@ -96,8 +96,17 @@ pub mod ets2 {
     /// Added multiplayer time offset and corrected trailer wear channels.
     pub const V1_18: GameSchemaVersion =
         GameSchemaVersion::from_raw(sys::games::ets2::VERSION_1_18);
+    /// Declared the mandatory-break channel, which SCS did not yet provide.
+    pub const V1_19: GameSchemaVersion =
+        GameSchemaVersion::from_raw(sys::games::ets2::VERSION_1_19);
+    /// Added bus-job related configurations.
+    pub const V1_20: GameSchemaVersion =
+        GameSchemaVersion::from_raw(sys::games::ets2::VERSION_1_20);
+    /// Fixed delivery of the mandatory-break channel.
+    pub const V1_21: GameSchemaVersion =
+        GameSchemaVersion::from_raw(sys::games::ets2::VERSION_1_21);
 
-    /// Latest ETS2 schema declared by the vendored SDK 1.14 headers.
+    /// Latest ETS2 schema declared by the vendored SDK 1.16 headers.
     pub const CURRENT: GameSchemaVersion =
         GameSchemaVersion::from_raw(sys::games::ets2::VERSION_CURRENT);
 }
@@ -119,8 +128,14 @@ pub mod ats {
     pub const V1_04: GameSchemaVersion = GameSchemaVersion::from_raw(sys::games::ats::VERSION_1_04);
     /// Added multiplayer time offset and corrected trailer wear channels.
     pub const V1_05: GameSchemaVersion = GameSchemaVersion::from_raw(sys::games::ats::VERSION_1_05);
+    /// Declared the mandatory-break channel, which SCS did not yet provide.
+    pub const V1_06: GameSchemaVersion = GameSchemaVersion::from_raw(sys::games::ats::VERSION_1_06);
+    /// Added car-job related configurations and gameplay events.
+    pub const V1_07: GameSchemaVersion = GameSchemaVersion::from_raw(sys::games::ats::VERSION_1_07);
+    /// Fixed delivery of the mandatory-break channel.
+    pub const V1_08: GameSchemaVersion = GameSchemaVersion::from_raw(sys::games::ats::VERSION_1_08);
 
-    /// Latest ATS schema declared by the vendored SDK 1.14 headers.
+    /// Latest ATS schema declared by the vendored SDK 1.16 headers.
     pub const CURRENT: GameSchemaVersion =
         GameSchemaVersion::from_raw(sys::games::ats::VERSION_CURRENT);
 }
@@ -150,7 +165,10 @@ mod tests {
         assert_eq!(ets2::V1_16.raw(), crate::sys::games::ets2::VERSION_1_16);
         assert_eq!(ets2::V1_17.raw(), crate::sys::games::ets2::VERSION_1_17);
         assert_eq!(ets2::V1_18.raw(), crate::sys::games::ets2::VERSION_1_18);
-        assert_eq!(ets2::CURRENT, ets2::V1_18);
+        assert_eq!(ets2::V1_19.raw(), crate::sys::games::ets2::VERSION_1_19);
+        assert_eq!(ets2::V1_20.raw(), crate::sys::games::ets2::VERSION_1_20);
+        assert_eq!(ets2::V1_21.raw(), crate::sys::games::ets2::VERSION_1_21);
+        assert_eq!(ets2::CURRENT, ets2::V1_21);
 
         assert_eq!(ats::V1_00.raw(), crate::sys::games::ats::VERSION_1_00);
         assert_eq!(ats::V1_01.raw(), crate::sys::games::ats::VERSION_1_01);
@@ -158,6 +176,9 @@ mod tests {
         assert_eq!(ats::V1_03.raw(), crate::sys::games::ats::VERSION_1_03);
         assert_eq!(ats::V1_04.raw(), crate::sys::games::ats::VERSION_1_04);
         assert_eq!(ats::V1_05.raw(), crate::sys::games::ats::VERSION_1_05);
-        assert_eq!(ats::CURRENT, ats::V1_05);
+        assert_eq!(ats::V1_06.raw(), crate::sys::games::ats::VERSION_1_06);
+        assert_eq!(ats::V1_07.raw(), crate::sys::games::ats::VERSION_1_07);
+        assert_eq!(ats::V1_08.raw(), crate::sys::games::ats::VERSION_1_08);
+        assert_eq!(ats::CURRENT, ats::V1_08);
     }
 }

@@ -3,15 +3,15 @@
 **中文** | [English](README.md)
 
 `scs-sdk-sys` 是面向 64 位游戏进程、无依赖、`no_std`、手写实现的
-**SCS SDK 1.14** 公开 telemetry 与 input 接口的原始 ABI 层。它镜像 Euro Truck Simulator 2
+**SCS SDK 1.16** 公开 telemetry 与 input 接口的原始 ABI 层。它镜像 Euro Truck Simulator 2
 与 American Truck Simulator 使用的 C 声明，不负责安全 wrapper 策略、插件生命周期
 或产品逻辑。
 
 权威来源是仓库内保留的官方 header 分发：
-[`third-party/scs_sdk_1_14/`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/third-party/scs_sdk_1_14)。Rust 定义会逐项
+[`third-party/scs_sdk_1_16/`](https://github.com/AptS-1547/scs-sdk-crates/tree/master/third-party/scs_sdk_1_16)。Rust 定义会逐项
 对照这些文件审计布局、数值、函数签名、调用约定与以 NUL 结尾的字节常量。
 
-> 本 crate 覆盖 SDK 1.14 中的公开 Telemetry API 1.00/1.01 与 Input API 1.00。
+> 本 crate 覆盖 SDK 1.16 中的公开 Telemetry API 1.00/1.01 与 Input API 1.00。
 
 本 crate 是独立社区项目，与 SCS Software 不存在隶属或官方背书关系。
 
@@ -38,15 +38,15 @@
 | `gameplay` | Gameplay event ID 与 attribute 常量。 |
 | `games` | 官方 ETS2、ATS 标识符与版本常量。 |
 
-SDK 1.14 telemetry 原始清单为：
+SDK 1.16 telemetry 原始清单为：
 
 | 接口面 | 数量 |
 | --- | ---: |
-| Channels | 107 |
-| Configuration IDs | 6 |
-| Configuration attributes | 60 |
-| Gameplay event IDs | 6 |
-| Gameplay attributes | 15 |
+| Channels | 108 |
+| Configuration IDs | 8 |
+| Configuration attributes | 64 |
+| Gameplay event IDs | 8 |
+| Gameplay attributes | 16 |
 
 Input API 原始清单还覆盖 2 个 device class、2 个 value type、2 个 callback flag、
 每设备 400 input 上限、v1.00 init layout，以及两个 loader callback/export。
@@ -87,6 +87,11 @@ cargo clippy --locked -p scs-sdk-sys --all-targets -- -D warnings
 RUSTDOCFLAGS=-Dwarnings cargo doc --locked -p scs-sdk-sys --no-deps
 ```
 
+`cargo test -p scs-sdk-sys` 包含 `tests/header_coverage.rs`：它解析仓库内
+`third-party/scs_sdk_1_16/include` 的官方 header，要求每个 string macro 与
+game-version macro 都按官方 header 顺序出现在对应的 raw catalog 中，且不得多出
+任何名称。该测试读取仅存在于 workspace 的第三方文件，因此不包含在发布的 package 中。
+
 修改 ABI layout、padding、union、catalog 或版本常量时，还必须验证安全解释层：
 
 ```bash
@@ -102,9 +107,9 @@ cargo +nightly-2026-04-12 miri test --locked -p scs-sdk
 Workspace 自有 Rust 代码可由你选择使用
 [Apache License 2.0](LICENSE-APACHE) 或 [MIT](LICENSE-MIT)。
 
-来源于 SDK 1.0 到 1.14 的 ABI 声明、常量、标识符、catalog、schema-history
+来源于 SDK 1.0 到 1.16 的 ABI 声明、常量、标识符、catalog、schema-history
 元数据与相关文档保留两份原始 SCS Software 声明：SDK 1.0-1.5 见
-[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.14 见
+[LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)，SDK 1.6-1.16 见
 [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016)。
-[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+[官方 SDK 压缩包](https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip)
 仍是第三方材料，不会被重新许可为 workspace license。

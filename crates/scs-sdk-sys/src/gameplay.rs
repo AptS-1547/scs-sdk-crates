@@ -6,13 +6,21 @@
 /// Gameplay event identifiers.
 pub mod events {
     /// Number of constants declared in this group.
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 8;
 
     /// Event called when job is cancelled.
     ///
     /// Attributes:
     /// - `cancel_penalty`
     pub const JOB_CANCELLED: &[u8] = b"job.cancelled\0";
+
+    /// Event called when car job is cancelled.
+    ///
+    /// Attributes:
+    /// - `cancel_penalty`
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    pub const CAR_JOB_CANCELLED: &[u8] = b"car_job.cancelled\0";
 
     /// Event called when job is delivered.
     ///
@@ -25,6 +33,19 @@ pub mod events {
     /// - `autopark_used`
     /// - `autoload_used`
     pub const JOB_DELIVERED: &[u8] = b"job.delivered\0";
+
+    /// Event called when car job is delivered.
+    ///
+    /// Attributes:
+    /// - revenue
+    /// - `earned_xp`
+    /// - `cargo_damage`
+    /// - `vehicle_damage`
+    /// - `distance_km`
+    /// - `delivery_time`
+    ///
+    /// Introduced by ATS telemetry 1.07.
+    pub const CAR_JOB_DELIVERED: &[u8] = b"car_job.delivered\0";
 
     /// Event called when player gets fined.
     ///
@@ -62,7 +83,9 @@ pub mod events {
     /// All raw gameplay event identifiers in official header order.
     pub const ALL: [&[u8]; COUNT] = [
         JOB_CANCELLED,
+        CAR_JOB_CANCELLED,
         JOB_DELIVERED,
+        CAR_JOB_DELIVERED,
         PLAYER_FINED,
         PLAYER_TOLLGATE_PAID,
         PLAYER_USE_FERRY,
@@ -73,7 +96,7 @@ pub mod events {
 /// Attributes carried by gameplay events.
 pub mod attributes {
     /// Number of constants declared in this group.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     /// The penalty for cancelling the job in native game currency. (Can be 0)
     ///
@@ -94,6 +117,13 @@ pub mod attributes {
     ///
     /// Type: float
     pub const CARGO_DAMAGE: &[u8] = b"cargo.damage\0";
+
+    /// Total vehicle damage. (Range <0.0, 1.0>)
+    ///
+    /// Introduced by ATS telemetry 1.07 for `car_job.delivered`.
+    ///
+    /// Type: float
+    pub const VEHICLE_DAMAGE: &[u8] = b"vehicle.damage\0";
 
     /// The real distance in km on the job.
     ///
@@ -172,6 +202,7 @@ pub mod attributes {
         REVENUE,
         EARNED_XP,
         CARGO_DAMAGE,
+        VEHICLE_DAMAGE,
         DISTANCE_KM,
         DELIVERY_TIME,
         AUTO_PARK_USED,
@@ -189,4 +220,4 @@ pub mod attributes {
 /// Total number of gameplay string macros covered by this module.
 pub const COUNT: usize = events::COUNT + attributes::COUNT;
 
-const _: [(); 21] = [(); COUNT];
+const _: [(); 24] = [(); COUNT];

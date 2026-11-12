@@ -15,7 +15,7 @@ use crate::{GameSchemaVersion, SdkValue, ValueRef, ValueType, sys};
 ///
 /// A `None` entry is meaningful: the current official game header explicitly
 /// documents that descriptor as unavailable for that game. It is not an
-/// unknown-version wildcard. The SDK 1.0 through 1.14 header history is the
+/// unknown-version wildcard. The SDK 1.0 through 1.16 header history is the
 /// source for the metadata attached to the built-in catalogs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GameSchemaAvailability {

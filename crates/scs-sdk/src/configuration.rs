@@ -1,7 +1,7 @@
 //! Typed configuration catalog for the SCS Telemetry SDK.
 //!
 //! This module covers every public configuration ID, attribute, and
-//! documented H-shifter value in the SDK 1.14 header bundle.
+//! documented H-shifter value in the SDK 1.16 header bundle.
 
 use core::ffi::CStr;
 use core::str::FromStr;
@@ -25,17 +25,25 @@ const ETS2_1_14_ATS_1_01: GameSchemaAvailability =
     GameSchemaAvailability::new(Some(game::ets2::V1_14), Some(game::ats::V1_01));
 const ETS2_1_15_ATS_1_02: GameSchemaAvailability =
     GameSchemaAvailability::new(Some(game::ets2::V1_15), Some(game::ats::V1_02));
+// Bus jobs are documented only by the ETS2 changelog (1.20); no ATS schema
+// declares them.
+const ETS2_ONLY_1_20: GameSchemaAvailability =
+    GameSchemaAvailability::new(Some(game::ets2::V1_20), None);
+// Car jobs are documented only by the ATS changelog (1.07); no ETS2 schema
+// declares them.
+const ATS_ONLY_1_07: GameSchemaAvailability =
+    GameSchemaAvailability::new(None, Some(game::ats::V1_07));
 
 /// Maximum number of trailers represented by the SDK.
 pub const MAX_TRAILERS: usize = crate::TrailerIndex::COUNT;
 
 /// Configuration group identifiers.
 pub mod ids {
-    use super::{ETS2_1_09_ATS_1_00, INITIAL};
+    use super::{ATS_ONLY_1_07, ETS2_1_09_ATS_1_00, ETS2_ONLY_1_20, INITIAL};
     use crate::ConfigurationId;
 
     /// Number of official configuration identifiers.
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 8;
 
     /// Configuration of the substances.
     ///
@@ -45,7 +53,7 @@ pub mod ids {
     /// - `id`
     ///
     /// The upstream SDK header leaves the remaining substance attributes as a
-    /// TODO, so version 1.14 does not define any additional public names here.
+    /// TODO, so version 1.16 does not define any additional public names here.
     pub const SUBSTANCES: ConfigurationId = ConfigurationId::new(c"substances", INITIAL);
 
     /// Static configuration of the controls.
@@ -150,24 +158,65 @@ pub mod ids {
     /// - `planned_distance_km`
     pub const JOB: ConfigurationId = ConfigurationId::new(c"job", ETS2_1_09_ATS_1_00);
 
-    /// Every public configuration group in SDK 1.14 header order.
+    /// Static configuration of the bus job.
+    ///
+    /// If empty set of attributes is returned, there is no bus job.
+    ///
+    /// SCS states that the supported attributes will be documented after the
+    /// release of the bus DLC, so SDK 1.16 associates no attribute with this
+    /// group. Generic attribute access on the configuration event still
+    /// exposes whatever the game sends.
+    ///
+    /// Introduced by ETS2 telemetry schema 1.20; no ATS schema declares it.
+    pub const BUS_JOB: ConfigurationId = ConfigurationId::new(c"bus_job", ETS2_ONLY_1_20);
+
+    /// Static configuration of the car job.
+    ///
+    /// If empty set of attributes is returned, there is no car job.
+    ///
+    /// Supported attributes:
+    /// - `cargo_id`
+    /// - cargo
+    /// - `cargo_unit_count`
+    /// - `destination_city_id`
+    /// - `destination_city`
+    /// - `source_city_id`
+    /// - `source_city`
+    /// - `destination_company_id`
+    /// - `destination_company`
+    /// - `source_company_id`
+    /// - `source_company`
+    /// - income - represents expected income for the car job without any penalties
+    /// - `delivery_time`
+    /// - `car_job_market`
+    /// - `customer_prio_cargo_handling`
+    /// - `customer_prio_time`
+    /// - `customer_prio_vehicle_appearance`
+    /// - `planned_distance_km`
+    ///
+    /// Introduced by ATS telemetry schema 1.07; no ETS2 schema declares it.
+    pub const CAR_JOB: ConfigurationId = ConfigurationId::new(c"car_job", ATS_ONLY_1_07);
+
+    /// Every public configuration group in SDK 1.16 header order.
     ///
     /// The trailer entry is the backward-compatible `trailer` identifier. The
     /// game additionally emits `trailer.0` through `trailer.9`; consumers must
     /// still select those numbered groups explicitly when they need them.
-    pub const ALL: [ConfigurationId; COUNT] = [SUBSTANCES, CONTROLS, HSHIFTER, TRUCK, TRAILER, JOB];
+    pub const ALL: [ConfigurationId; COUNT] = [
+        SUBSTANCES, CONTROLS, HSHIFTER, TRUCK, TRAILER, JOB, BUS_JOB, CAR_JOB,
+    ];
 }
 
 /// Typed attributes carried by configuration events.
 pub mod attributes {
     use super::{
-        ETS2_1_01_ATS_1_00, ETS2_1_09_ATS_1_00, ETS2_1_10_ATS_1_00, ETS2_1_12_ATS_1_00,
-        ETS2_1_14_ATS_1_01, ETS2_1_15_ATS_1_02, INITIAL,
+        ATS_ONLY_1_07, ETS2_1_01_ATS_1_00, ETS2_1_09_ATS_1_00, ETS2_1_10_ATS_1_00,
+        ETS2_1_12_ATS_1_00, ETS2_1_14_ATS_1_01, ETS2_1_15_ATS_1_02, INITIAL,
     };
     use crate::{AnyAttribute, Attribute};
 
     /// Number of official typed configuration attributes.
-    pub const COUNT: usize = 60;
+    pub const COUNT: usize = 64;
 
     /// Brand id for configuration purposes.
     ///
@@ -572,12 +621,51 @@ pub mod attributes {
     pub const JOB_MARKET: Attribute<crate::StringValue> =
         Attribute::new(c"job.market", ETS2_1_14_ATS_1_01);
 
+    /// The car job market this car job is from.
+    ///
+    /// The value is a string representing the type of the car job market.
+    /// Possible values:
+    /// - `quick_job`
+    /// - `dispatch_job`
+    ///
+    /// See [`crate::configuration::CarJobMarket`] for the known-value catalog.
+    /// Introduced by ATS telemetry schema 1.07.
+    ///
+    /// Type: string
+    pub const CAR_JOB_MARKET: Attribute<crate::StringValue> =
+        Attribute::new(c"car_job.market", ATS_ONLY_1_07);
+
     /// Flag indicating that the job is special transport job.
     ///
     /// Type: bool
     pub const SPECIAL_JOB: Attribute<bool> = Attribute::new(c"is.special.job", ETS2_1_14_ATS_1_01);
 
-    /// Every public configuration attribute from the SDK 1.14 headers.
+    /// Flag indicating that the car job's customer prioritizes cargo handling.
+    ///
+    /// Introduced by ATS telemetry schema 1.07.
+    ///
+    /// Type: bool
+    pub const CUSTOMER_PRIO_CARGO_HANDLING: Attribute<bool> =
+        Attribute::new(c"customer.prio.cargo", ATS_ONLY_1_07);
+
+    /// Flag indicating that the car job's customer prioritizes delivery time.
+    ///
+    /// Introduced by ATS telemetry schema 1.07.
+    ///
+    /// Type: bool
+    pub const CUSTOMER_PRIO_TIME: Attribute<bool> =
+        Attribute::new(c"customer.prio.time", ATS_ONLY_1_07);
+
+    /// Flag indicating that the car job's customer prioritizes vehicle
+    /// appearance at delivery.
+    ///
+    /// Introduced by ATS telemetry schema 1.07.
+    ///
+    /// Type: bool
+    pub const CUSTOMER_PRIO_VEHICLE_APPEARANCE: Attribute<bool> =
+        Attribute::new(c"customer.prio.vehicle", ATS_ONLY_1_07);
+
+    /// Every public configuration attribute from the SDK 1.16 headers.
     ///
     /// Type erasure exists only to make the heterogeneous catalog enumerable.
     /// Each entry retains its exact SCS value type and indexed/scalar lookup
@@ -643,7 +731,11 @@ pub mod attributes {
         PLANNED_DISTANCE_KM.erase(),
         IS_CARGO_LOADED.erase(),
         JOB_MARKET.erase(),
+        CAR_JOB_MARKET.erase(),
         SPECIAL_JOB.erase(),
+        CUSTOMER_PRIO_CARGO_HANDLING.erase(),
+        CUSTOMER_PRIO_TIME.erase(),
+        CUSTOMER_PRIO_VEHICLE_APPEARANCE.erase(),
     ];
 }
 
@@ -657,8 +749,8 @@ pub mod attributes {
 /// values which the prose list omits (notably transmission and wheel data).
 pub mod associations {
     use super::{
-        ETS2_1_01_ATS_1_00, ETS2_1_09_ATS_1_00, ETS2_1_10_ATS_1_00, ETS2_1_12_ATS_1_00,
-        ETS2_1_14_ATS_1_01, ETS2_1_15_ATS_1_02, INITIAL, attributes, ids,
+        ATS_ONLY_1_07, ETS2_1_01_ATS_1_00, ETS2_1_09_ATS_1_00, ETS2_1_10_ATS_1_00,
+        ETS2_1_12_ATS_1_00, ETS2_1_14_ATS_1_01, ETS2_1_15_ATS_1_02, INITIAL, attributes, ids,
     };
     use crate::{
         Attribute, ConfigurationAttributeAssociation, ConfigurationId, GameSchemaAvailability,
@@ -667,10 +759,11 @@ pub mod associations {
 
     /// Total number of configuration-to-attribute relationships.
     ///
-    /// This is larger than the 60-name attribute catalog because identifiers
-    /// such as `id`, `brand`, license-plate data, hook position, and wheel
-    /// geometry occur in more than one configuration group.
-    pub const COUNT: usize = 71;
+    /// This is larger than the 64-name attribute catalog because identifiers
+    /// such as `id`, `brand`, license-plate data, hook position, wheel
+    /// geometry, and the cargo/route/income job data occur in more than one
+    /// configuration group.
+    pub const COUNT: usize = 89;
 
     const fn association<T: SdkValue>(
         configuration: ConfigurationId,
@@ -833,7 +926,53 @@ pub mod associations {
         ),
     ];
 
-    /// Every official configuration-to-attribute relationship in SDK 1.14.
+    /// Attributes carried by the bus-job configuration.
+    ///
+    /// SDK 1.16 documents no bus-job attributes yet; SCS will document them
+    /// after the bus DLC is released. The empty group keeps the relationship
+    /// catalog complete and makes the absence explicit rather than implied.
+    pub const BUS_JOB: [ConfigurationAttributeAssociation; 0] = [];
+
+    /// Attributes carried by the car-job configuration, in the header's
+    /// documented order.
+    ///
+    /// Shared cargo, route, income, delivery-time, and planned-distance
+    /// descriptors keep their own (older) job history; these relationships
+    /// exist only from ATS schema 1.07, when car jobs were introduced.
+    pub const CAR_JOB: [ConfigurationAttributeAssociation; 18] = [
+        association(ids::CAR_JOB, attributes::CARGO_ID, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::CARGO, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::CARGO_UNIT_COUNT, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::DESTINATION_CITY_ID, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::DESTINATION_CITY, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::SOURCE_CITY_ID, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::SOURCE_CITY, ATS_ONLY_1_07),
+        association(
+            ids::CAR_JOB,
+            attributes::DESTINATION_COMPANY_ID,
+            ATS_ONLY_1_07,
+        ),
+        association(ids::CAR_JOB, attributes::DESTINATION_COMPANY, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::SOURCE_COMPANY_ID, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::SOURCE_COMPANY, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::INCOME, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::DELIVERY_TIME, ATS_ONLY_1_07),
+        association(ids::CAR_JOB, attributes::CAR_JOB_MARKET, ATS_ONLY_1_07),
+        association(
+            ids::CAR_JOB,
+            attributes::CUSTOMER_PRIO_CARGO_HANDLING,
+            ATS_ONLY_1_07,
+        ),
+        association(ids::CAR_JOB, attributes::CUSTOMER_PRIO_TIME, ATS_ONLY_1_07),
+        association(
+            ids::CAR_JOB,
+            attributes::CUSTOMER_PRIO_VEHICLE_APPEARANCE,
+            ATS_ONLY_1_07,
+        ),
+        association(ids::CAR_JOB, attributes::PLANNED_DISTANCE_KM, ATS_ONLY_1_07),
+    ];
+
+    /// Every official configuration-to-attribute relationship in SDK 1.16.
     pub const ALL: [ConfigurationAttributeAssociation; COUNT] = [
         SUBSTANCES[0],
         CONTROLS[0],
@@ -906,6 +1045,24 @@ pub mod associations {
         JOB[16],
         JOB[17],
         JOB[18],
+        CAR_JOB[0],
+        CAR_JOB[1],
+        CAR_JOB[2],
+        CAR_JOB[3],
+        CAR_JOB[4],
+        CAR_JOB[5],
+        CAR_JOB[6],
+        CAR_JOB[7],
+        CAR_JOB[8],
+        CAR_JOB[9],
+        CAR_JOB[10],
+        CAR_JOB[11],
+        CAR_JOB[12],
+        CAR_JOB[13],
+        CAR_JOB[14],
+        CAR_JOB[15],
+        CAR_JOB[16],
+        CAR_JOB[17],
     ];
 }
 
@@ -982,7 +1139,7 @@ impl FromStr for ShifterType {
 ///
 /// Unknown future strings remain available through the generic typed string
 /// attribute API. This enum intentionally recognizes only the values listed by
-/// the vendored SDK 1.14 header, allowing callers to distinguish a known market
+/// the vendored SDK 1.16 header, allowing callers to distinguish a known market
 /// from a future additive value without losing the original text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobMarket {
@@ -994,7 +1151,7 @@ pub enum JobMarket {
 }
 
 impl JobMarket {
-    /// Number of job-market strings documented by SDK 1.14.
+    /// Number of job-market strings documented by SDK 1.16.
     pub const COUNT: usize = 5;
 
     /// Every documented job-market value in header order.
@@ -1059,11 +1216,81 @@ impl FromStr for JobMarket {
     }
 }
 
-const _: [(); 6] = [(); ids::COUNT];
-const _: [(); 60] = [(); attributes::COUNT];
-const _: [(); 71] = [(); associations::COUNT];
+/// Documented values of the `car_job.market` configuration attribute.
+///
+/// Unknown future strings remain available through the generic typed string
+/// attribute API. This enum intentionally recognizes only the values listed by
+/// the vendored SDK 1.16 header, allowing callers to distinguish a known car
+/// job market from a future additive value without losing the original text.
+///
+/// The car-job market is a separate domain from [`JobMarket`] even though both
+/// spell one value `quick_job`; the two attributes belong to different
+/// configuration groups and evolve independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CarJobMarket {
+    /// Car job taken from the quick-job market.
+    QuickJob,
+    /// Car job taken from the dispatch market.
+    DispatchJob,
+}
+
+impl CarJobMarket {
+    /// Number of car-job-market strings documented by SDK 1.16.
+    pub const COUNT: usize = 2;
+
+    /// Every documented car-job-market value in header order.
+    pub const ALL: [Self; Self::COUNT] = [Self::QuickJob, Self::DispatchJob];
+
+    /// First game schemas which provide the `car_job.market` value.
+    #[must_use]
+    pub const fn availability(self) -> GameSchemaAvailability {
+        let _ = self;
+        ATS_ONLY_1_07
+    }
+
+    /// Canonical Rust string used by the SDK.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::QuickJob => "quick_job",
+            Self::DispatchJob => "dispatch_job",
+        }
+    }
+
+    /// Canonical NUL-terminated string used by the C SDK.
+    #[must_use]
+    pub const fn as_c_str(self) -> &'static CStr {
+        match self {
+            Self::QuickJob => c"quick_job",
+            Self::DispatchJob => c"dispatch_job",
+        }
+    }
+
+    /// Parses one canonical car-job-market value from an SDK C string.
+    #[must_use]
+    pub fn from_c_str(value: &CStr) -> Option<Self> {
+        value.to_str().ok()?.parse().ok()
+    }
+}
+
+impl FromStr for CarJobMarket {
+    type Err = UnknownStringValue;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "quick_job" => Ok(Self::QuickJob),
+            "dispatch_job" => Ok(Self::DispatchJob),
+            _ => Err(UnknownStringValue),
+        }
+    }
+}
+
+const _: [(); 8] = [(); ids::COUNT];
+const _: [(); 64] = [(); attributes::COUNT];
+const _: [(); 89] = [(); associations::COUNT];
 const _: [(); 4] = [(); ShifterType::COUNT];
 const _: [(); 5] = [(); JobMarket::COUNT];
+const _: [(); 2] = [(); CarJobMarket::COUNT];
 
 #[cfg(test)]
 mod tests {
@@ -1086,16 +1313,18 @@ mod tests {
             attributes::COUNT,
             crate::sys::configuration::attributes::COUNT
         );
-        assert_eq!(ids::COUNT, 6);
-        assert_eq!(attributes::COUNT, 60);
+        assert_eq!(ids::COUNT, 8);
+        assert_eq!(attributes::COUNT, 64);
         assert_eq!(MAX_TRAILERS, crate::sys::configuration::MAX_TRAILERS);
-        assert_eq!(associations::COUNT, 71);
+        assert_eq!(associations::COUNT, 89);
         assert_eq!(associations::SUBSTANCES.len(), 1);
         assert_eq!(associations::CONTROLS.len(), 1);
         assert_eq!(associations::HSHIFTER.len(), 4);
         assert_eq!(associations::TRUCK.len(), 33);
         assert_eq!(associations::TRAILER.len(), 13);
         assert_eq!(associations::JOB.len(), 19);
+        assert_eq!(associations::BUS_JOB.len(), 0);
+        assert_eq!(associations::CAR_JOB.len(), 18);
     }
 
     #[test]
@@ -1145,6 +1374,7 @@ mod tests {
             (ids::TRUCK, 6..39),
             (ids::TRAILER, 39..52),
             (ids::JOB, 52..71),
+            (ids::CAR_JOB, 71..89),
         ];
 
         for (configuration, range) in groups {
@@ -1175,6 +1405,34 @@ mod tests {
             associations::JOB[18].attribute(),
             attributes::PLANNED_DISTANCE_KM.erase()
         );
+        assert_eq!(
+            associations::CAR_JOB[13].attribute(),
+            attributes::CAR_JOB_MARKET.erase()
+        );
+        assert_eq!(
+            associations::CAR_JOB[17].attribute(),
+            attributes::PLANNED_DISTANCE_KM.erase()
+        );
+        assert!(
+            associations::ALL
+                .iter()
+                .all(|association| association.configuration() != ids::BUS_JOB),
+            "SDK 1.16 documents no bus-job attributes"
+        );
+    }
+
+    /// A relationship can exist in one game only when both its group and its
+    /// attribute exist there, and never before either of them.
+    fn relation_is_consistent(
+        relation: Option<GameSchemaVersion>,
+        group: Option<GameSchemaVersion>,
+        value: Option<GameSchemaVersion>,
+    ) -> bool {
+        match (relation, group, value) {
+            (Some(relation), Some(group), Some(value)) => relation >= group && relation >= value,
+            (None, _, _) => true,
+            _ => false,
+        }
     }
 
     #[test]
@@ -1184,22 +1442,23 @@ mod tests {
             let configuration = association.configuration().availability();
             let attribute = association.attribute().availability();
 
-            assert!(matches!(
-                (
-                    availability.available_since_ets2(),
-                    configuration.available_since_ets2(),
-                    attribute.available_since_ets2()
-                ),
-                (Some(relation), Some(group), Some(value)) if relation >= group && relation >= value
+            assert!(relation_is_consistent(
+                availability.available_since_ets2(),
+                configuration.available_since_ets2(),
+                attribute.available_since_ets2()
             ));
-            assert!(matches!(
-                (
-                    availability.available_since_ats(),
-                    configuration.available_since_ats(),
-                    attribute.available_since_ats()
-                ),
-                (Some(relation), Some(group), Some(value)) if relation >= group && relation >= value
+            assert!(relation_is_consistent(
+                availability.available_since_ats(),
+                configuration.available_since_ats(),
+                attribute.available_since_ats()
             ));
+            assert!(
+                availability.available_since_ets2().is_some()
+                    || availability.available_since_ats().is_some(),
+                "association available in no game: {:?} -> {:?}",
+                association.configuration().name(),
+                association.attribute().name()
+            );
         }
     }
 
@@ -1340,14 +1599,65 @@ mod tests {
             game::ats::V1_02,
         );
 
+        // Only the SDK 1.16 bus-job (ETS2) and car-job (ATS) additions are
+        // single-game descriptors; everything older exists in both games.
+        let single_game_ids = [ids::BUS_JOB, ids::CAR_JOB];
         assert!(ids::ALL.iter().all(|descriptor| {
-            descriptor.availability().available_since_ets2().is_some()
-                && descriptor.availability().available_since_ats().is_some()
+            single_game_ids.contains(descriptor)
+                || (descriptor.availability().available_since_ets2().is_some()
+                    && descriptor.availability().available_since_ats().is_some())
         }));
+        let car_job_only = [
+            attributes::CAR_JOB_MARKET.erase(),
+            attributes::CUSTOMER_PRIO_CARGO_HANDLING.erase(),
+            attributes::CUSTOMER_PRIO_TIME.erase(),
+            attributes::CUSTOMER_PRIO_VEHICLE_APPEARANCE.erase(),
+        ];
         assert!(attributes::ALL.iter().all(|descriptor| {
-            descriptor.availability().available_since_ets2().is_some()
-                && descriptor.availability().available_since_ats().is_some()
+            car_job_only.contains(descriptor)
+                || (descriptor.availability().available_since_ets2().is_some()
+                    && descriptor.availability().available_since_ats().is_some())
         }));
+    }
+
+    #[test]
+    fn sdk_1_16_job_groups_follow_their_single_game_history() {
+        assert_eq!(ids::BUS_JOB.name(), c"bus_job");
+        assert_eq!(
+            ids::BUS_JOB.availability(),
+            GameSchemaAvailability::new(Some(game::ets2::V1_20), None)
+        );
+        assert_eq!(ids::CAR_JOB.name(), c"car_job");
+        let car_job = GameSchemaAvailability::new(None, Some(game::ats::V1_07));
+        assert_eq!(ids::CAR_JOB.availability(), car_job);
+
+        assert_eq!(attributes::CAR_JOB_MARKET.name(), c"car_job.market");
+        assert_eq!(
+            attributes::CAR_JOB_MARKET.value_type(),
+            crate::sys::SCS_VALUE_TYPE_STRING
+        );
+        for attribute in [
+            attributes::CUSTOMER_PRIO_CARGO_HANDLING,
+            attributes::CUSTOMER_PRIO_TIME,
+            attributes::CUSTOMER_PRIO_VEHICLE_APPEARANCE,
+        ] {
+            assert_eq!(attribute.value_type(), crate::sys::SCS_VALUE_TYPE_BOOL);
+            assert!(!attribute.is_indexed());
+            assert_eq!(attribute.availability(), car_job);
+        }
+        assert_eq!(attributes::CAR_JOB_MARKET.availability(), car_job);
+
+        for association in associations::CAR_JOB {
+            assert_eq!(association.configuration(), ids::CAR_JOB);
+            assert_eq!(association.availability(), car_job);
+        }
+        // Shared job descriptors keep their own, older history.
+        assert_since(attributes::CARGO_ID, game::ets2::V1_09, game::ats::V1_00);
+        assert_since(
+            attributes::PLANNED_DISTANCE_KM,
+            game::ets2::V1_15,
+            game::ats::V1_02,
+        );
     }
 
     #[test]
@@ -1376,6 +1686,24 @@ mod tests {
         assert_eq!(JobMarket::from_c_str(c"future_market"), None);
         assert_eq!(
             "future_market".parse::<JobMarket>(),
+            Err(UnknownStringValue)
+        );
+    }
+
+    #[test]
+    fn every_documented_car_job_market_round_trips() {
+        assert_eq!(CarJobMarket::COUNT, 2);
+        for value in CarJobMarket::ALL {
+            assert_eq!(CarJobMarket::from_c_str(value.as_c_str()), Some(value));
+            assert_eq!(value.as_str().parse(), Ok(value));
+            assert_eq!(value.availability(), ATS_ONLY_1_07);
+        }
+        assert_eq!(CarJobMarket::ALL[0].as_str(), "quick_job");
+        assert_eq!(CarJobMarket::ALL[1].as_str(), "dispatch_job");
+        // `freight_market` is a cargo-job market, not a car-job market.
+        assert_eq!(CarJobMarket::from_c_str(c"freight_market"), None);
+        assert_eq!(
+            "future_market".parse::<CarJobMarket>(),
             Err(UnknownStringValue)
         );
     }

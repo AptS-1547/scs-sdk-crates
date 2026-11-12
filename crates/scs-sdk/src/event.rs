@@ -33,7 +33,7 @@ impl Event {
 
     /// Oldest Telemetry API which defines this event identifier.
     ///
-    /// SCS SDK 1.14 documents gameplay events as an API 1.01 addition. The
+    /// SCS SDK 1.16 documents gameplay events as an API 1.01 addition. The
     /// other identifiers belong to the original API 1.00 event set. Keeping
     /// this capability metadata beside the canonical event enum ensures that
     /// registration policy and the raw numeric identifier cannot acquire
@@ -561,6 +561,185 @@ mod tests {
                 expected.is_some_and(TrailerConfigurationId::is_legacy)
             );
         }
+    }
+
+    fn named(name: &CStr, value: sys::ScsValue) -> sys::ScsNamedValue {
+        sys::ScsNamedValue {
+            name: name.as_ptr(),
+            index: sys::SCS_U32_NIL,
+            padding: sys::ScsPadding::uninit(),
+            value,
+        }
+    }
+
+    fn string_value(value: &CStr) -> sys::ScsValue {
+        sys::ScsValue {
+            type_: sys::SCS_VALUE_TYPE_STRING,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValueData {
+                value_string: sys::ScsValueString {
+                    value: value.as_ptr(),
+                },
+            },
+        }
+    }
+
+    fn bool_value(value: bool) -> sys::ScsValue {
+        sys::ScsValue {
+            type_: sys::SCS_VALUE_TYPE_BOOL,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValueData {
+                value_bool: sys::ScsValueBool {
+                    value: u8::from(value),
+                },
+            },
+        }
+    }
+
+    fn u32_value(value: u32) -> sys::ScsValue {
+        sys::ScsValue {
+            type_: sys::SCS_VALUE_TYPE_U32,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValueData {
+                value_u32: sys::ScsValueU32 { value },
+            },
+        }
+    }
+
+    fn f32_value(value: f32) -> sys::ScsValue {
+        sys::ScsValue {
+            type_: sys::SCS_VALUE_TYPE_FLOAT,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValueData {
+                value_float: sys::ScsValueFloat { value },
+            },
+        }
+    }
+
+    fn s64_value(value: i64) -> sys::ScsValue {
+        sys::ScsValue {
+            type_: sys::SCS_VALUE_TYPE_S64,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValueData {
+                value_s64: sys::ScsValueS64 { value },
+            },
+        }
+    }
+
+    fn terminator() -> sys::ScsNamedValue {
+        sys::ScsNamedValue {
+            name: core::ptr::null(),
+            index: 0,
+            padding: sys::ScsPadding::uninit(),
+            value: sys::ScsValue {
+                type_: sys::SCS_VALUE_TYPE_INVALID,
+                padding: sys::ScsPadding::uninit(),
+                value: sys::ScsValueData {
+                    value_u64: sys::ScsValueU64 { value: 0 },
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn car_job_configuration_decodes_its_sdk_1_16_attributes() {
+        use crate::configuration::{CarJobMarket, attributes, ids};
+
+        let attributes_raw = [
+            named(c"cargo.id", string_value(c"car_sedan")),
+            named(c"cargo.unit.count", u32_value(3)),
+            named(c"car_job.market", string_value(c"dispatch_job")),
+            named(c"customer.prio.cargo", bool_value(true)),
+            named(c"customer.prio.time", bool_value(false)),
+            named(c"customer.prio.vehicle", bool_value(true)),
+            named(c"planned_distance.km", u32_value(412)),
+            terminator(),
+        ];
+        let raw = sys::ScsTelemetryConfiguration {
+            id: c"car_job".as_ptr(),
+            attributes: attributes_raw.as_ptr(),
+        };
+        let event_info = (&raw const raw).cast::<c_void>();
+        let event =
+            // SAFETY: `raw` is aligned and initialized; its ID, every attribute
+            // name and string value, and the terminated attribute array outlive
+            // the borrowed configuration.
+            unsafe { ConfigurationRef::from_event_info(event_info) }.expect("car job fixture");
+
+        assert!(event.is(ids::CAR_JOB));
+        assert!(!event.is(ids::JOB));
+        assert!(!event.is(ids::BUS_JOB));
+        assert_eq!(event.trailer(), None, "car_job is not a trailer group");
+
+        let values = event.attributes();
+        assert_eq!(values.clone().get(attributes::CARGO_ID), Some(c"car_sedan"));
+        assert_eq!(values.clone().get(attributes::CARGO_UNIT_COUNT), Some(3));
+        let market = values
+            .clone()
+            .get(attributes::CAR_JOB_MARKET)
+            .expect("car job market");
+        assert_eq!(market, c"dispatch_job");
+        assert_eq!(
+            CarJobMarket::from_c_str(market),
+            Some(CarJobMarket::DispatchJob)
+        );
+        assert_eq!(
+            values.clone().get(attributes::CUSTOMER_PRIO_CARGO_HANDLING),
+            Some(true)
+        );
+        assert_eq!(
+            values.clone().get(attributes::CUSTOMER_PRIO_TIME),
+            Some(false)
+        );
+        assert_eq!(
+            values
+                .clone()
+                .get(attributes::CUSTOMER_PRIO_VEHICLE_APPEARANCE),
+            Some(true)
+        );
+        assert_eq!(
+            values.clone().get(attributes::PLANNED_DISTANCE_KM),
+            Some(412)
+        );
+        // Absent and mistyped lookups stay `None` instead of reading the union.
+        assert_eq!(values.clone().get(attributes::JOB_MARKET), None);
+        assert_eq!(
+            values.get(crate::Attribute::<i32>::new(
+                c"cargo.unit.count",
+                attributes::CARGO_UNIT_COUNT.availability()
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn car_job_delivered_decodes_vehicle_damage() {
+        use crate::gameplay::{attributes, events};
+
+        let attributes_raw = [
+            named(c"revenue", s64_value(18_250)),
+            named(c"cargo.damage", f32_value(0.0)),
+            named(c"vehicle.damage", f32_value(0.125)),
+            named(c"distance.km", f32_value(412.5)),
+            terminator(),
+        ];
+        let raw = sys::ScsTelemetryGameplayEvent {
+            id: c"car_job.delivered".as_ptr(),
+            attributes: attributes_raw.as_ptr(),
+        };
+        let event_info = (&raw const raw).cast::<c_void>();
+        // SAFETY: `raw` is aligned and initialized; its ID, every attribute
+        // name, and the terminated attribute array outlive the borrowed event.
+        let event = unsafe { GameplayEventRef::from_event_info(event_info) }
+            .expect("car job delivered fixture");
+
+        assert!(event.is(events::CAR_JOB_DELIVERED));
+        assert!(!event.is(events::JOB_DELIVERED));
+        let values = event.attributes();
+        assert_eq!(values.clone().get(attributes::REVENUE), Some(18_250));
+        assert_eq!(values.clone().get(attributes::VEHICLE_DAMAGE), Some(0.125));
+        assert_eq!(values.clone().get(attributes::CARGO_DAMAGE), Some(0.0));
+        assert_eq!(values.get(attributes::DISTANCE_KM), Some(412.5));
     }
 
     #[test]

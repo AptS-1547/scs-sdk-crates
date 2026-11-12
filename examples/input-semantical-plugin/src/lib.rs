@@ -1,7 +1,7 @@
 //! Safe application-boundary fixture for an SCS semantical input device.
 //!
 //! Semantical inputs map directly to game mixes with the same configuration
-//! name. This fixture follows the official SDK 1.14 example by exposing one
+//! name. This fixture follows the official SDK 1.16 example by exposing one
 //! bool input named `light`, which a fresh ETS2 or ATS controls file references
 //! as `semantical.light?0`. Unlike a generic device, it requires no binding in
 //! the game's controller UI.
@@ -27,7 +27,7 @@ use scs_sdk_plugin::{
     InputSpec, InputValue, InputValueType, PluginMetadata, PluginResult,
 };
 
-/// Official semantical mix used by the SDK 1.14 sample.
+/// Official semantical mix used by the SDK 1.16 sample.
 static INPUTS: [InputSpec; 1] = [InputSpec::new("light", "Lights", InputValueType::Bool)];
 
 static SUPPORTED_GAMES: [InputGameCompatibility; 2] = [

@@ -181,7 +181,7 @@ impl ValueType {
     /// Oldest Telemetry API which defines this tagged-union representation.
     ///
     /// The Telemetry API 1.01 changelog explicitly adds signed 64-bit values.
-    /// Every other value tag exposed by SDK 1.14 belongs to API 1.00. This is
+    /// Every other value tag exposed by SDK 1.16 belongs to API 1.00. This is
     /// representation availability, not a promise that every channel supports
     /// every representation: SCS still performs the channel-specific
     /// conversion check during registration.

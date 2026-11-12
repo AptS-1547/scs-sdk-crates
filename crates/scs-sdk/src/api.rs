@@ -110,7 +110,7 @@ impl ScopedLogger<'_> {
 
 /// Initialization-parameter layout selected for one audited API version.
 ///
-/// SCS SDK 1.14 defines separate names for the 1.00 and 1.01 parameter types,
+/// SCS SDK 1.16 defines separate names for the 1.00 and 1.01 parameter types,
 /// but the latter is a typedef of the former. Keeping the layout selection as
 /// an explicit internal enum gives a future API version a mandatory review
 /// point: it must either reuse an audited layout deliberately or add a new

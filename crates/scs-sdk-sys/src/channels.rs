@@ -1,13 +1,13 @@
 //! Raw channel names from the SCS Telemetry SDK headers.
 //!
 //! Every byte string is NUL-terminated for direct use with the C ABI. The
-//! documentation is derived from the official SDK 1.14 header bundle in
-//! third-party/scs_sdk_1_14/include/common.
+//! documentation is derived from the official SDK 1.16 header bundle in
+//! third-party/scs_sdk_1_16/include/common.
 
 /// Channels declared by `scssdk_telemetry_common_channels.h`.
 pub mod common {
     /// Number of public channel-name macros in the matching official header.
-    pub const COUNT: usize = 4;
+    pub const COUNT: usize = 5;
 
     /// Scale applied to distance and time to compensate
     /// for the scale of the map (e.g. 1s of real time corresponds to `local_scale`
@@ -42,7 +42,7 @@ pub mod common {
 
     /// Time until next rest stop.
     ///
-    /// When the fatique simulation is disabled, the behavior of this channel
+    /// When the fatigue simulation is disabled, the behavior of this channel
     /// is implementation dependent. The game might provide the value which would
     /// apply if it was enabled or provide no value at all.
     ///
@@ -51,12 +51,27 @@ pub mod common {
     /// Type: s32
     pub const NEXT_REST_STOP: &[u8] = b"rest.stop\0";
 
+    /// Time until the next required mandatory break.
+    ///
+    /// When the mandatory break simulation is disabled, the behavior of this
+    /// channel is implementation dependent. The game might provide the value
+    /// which would apply if it was enabled or provide no value at all.
+    ///
+    /// Represented in in-game minutes.
+    ///
+    /// Declared by ETS2 telemetry 1.19 and ATS 1.06, but SCS documents that
+    /// the channel was not provided until ETS2 1.21 and ATS 1.08.
+    ///
+    /// Type: s32
+    pub const NEXT_MANDATORY_BREAK: &[u8] = b"mandatory.break\0";
+
     /// All raw common channel names in official header order.
     pub const ALL: [&[u8]; COUNT] = [
         LOCAL_SCALE,
         GAME_TIME,
         MULTIPLAYER_TIME_OFFSET,
         NEXT_REST_STOP,
+        NEXT_MANDATORY_BREAK,
     ];
 }
 
@@ -828,4 +843,4 @@ pub mod job {
 /// Total number of channel-name macros covered by this module.
 pub const COUNT: usize = common::COUNT + truck::COUNT + trailer::COUNT + job::COUNT;
 
-const _: [(); 107] = [(); COUNT];
+const _: [(); 108] = [(); COUNT];

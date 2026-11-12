@@ -7,7 +7,7 @@ fixture。它可以为 Euro Truck Simulator 2 或 American Truck Simulator 构�
 原生插件，同时让手写 application 代码不接触裸指针、C 字符串、外部 ABI 声明和
 `unsafe`。
 
-fixture 遵循官方 SDK 1.14 的 `input_semantical` example：注册一个名为 `light`
+fixture 遵循官方 SDK 1.16 的 `input_semantical` example：注册一个名为 `light`
 的 bool input。SCS 会把该名称直接映射到游戏的 `semantical.light?0` mix，因此
 插件不需要经过控制器绑定步骤。
 

@@ -2136,6 +2136,39 @@ mod tests {
         }
     }
 
+    /// Subscribes to the SDK 1.16 mandatory-break channel plus a baseline
+    /// channel, for either game.
+    struct MandatoryBreakPlugin {
+        requirement: crate::SubscriptionRequirement,
+        ats: bool,
+    }
+
+    impl TelemetryPlugin for MandatoryBreakPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new("Mandatory break availability test plugin", "0.0.0-test")
+        }
+
+        fn compatibility(&self) -> PluginCompatibility {
+            if self.ats {
+                ats_test_compatibility()
+            } else {
+                test_compatibility()
+            }
+        }
+
+        fn initialize(&mut self, context: &mut PluginContext<'_>) -> PluginResult {
+            match self.requirement {
+                crate::SubscriptionRequirement::Required => {
+                    context.subscribe(channels::common::NEXT_MANDATORY_BREAK)?;
+                }
+                crate::SubscriptionRequirement::Optional => {
+                    context.subscribe_optional(channels::common::NEXT_MANDATORY_BREAK)?;
+                }
+            }
+            context.subscribe(channels::truck::SPEED)
+        }
+    }
+
     fn initialize_without_counts<P>(runtime: &'static Runtime, plugin: P) -> sys::ScsResult
     where
         P: TelemetryPlugin,
@@ -2393,6 +2426,112 @@ mod tests {
         optional_ats_runtime.shutdown();
         harness().reset();
         drop(optional_ats_owner);
+    }
+
+    #[test]
+    fn mandatory_break_channel_follows_sdk_1_16_schema_history() {
+        let _serial_guard = serial_guard();
+        let ets2 = (c"Euro Truck Simulator 2", c"eut2", false);
+        let ats = (c"American Truck Simulator", c"ats", true);
+        // A schema newer than the vendored headers stays inside the declared
+        // major family and must keep the channel.
+        let ets2_future = scs_sdk::GameSchemaVersion::from_raw(sys::make_version(1, 22));
+        let cases = [
+            // (game, schema, requirement, expected result, mandatory.break registered)
+            (
+                ets2,
+                scs_sdk::game::ets2::V1_18,
+                crate::SubscriptionRequirement::Required,
+                sys::SCS_RESULT_UNSUPPORTED,
+                false,
+            ),
+            (
+                ets2,
+                scs_sdk::game::ets2::V1_18,
+                crate::SubscriptionRequirement::Optional,
+                sys::SCS_RESULT_OK,
+                false,
+            ),
+            (
+                ets2,
+                scs_sdk::game::ets2::V1_21,
+                crate::SubscriptionRequirement::Required,
+                sys::SCS_RESULT_OK,
+                true,
+            ),
+            (
+                ets2,
+                ets2_future,
+                crate::SubscriptionRequirement::Optional,
+                sys::SCS_RESULT_OK,
+                true,
+            ),
+            (
+                ats,
+                scs_sdk::game::ats::V1_05,
+                crate::SubscriptionRequirement::Optional,
+                sys::SCS_RESULT_OK,
+                false,
+            ),
+            (
+                ats,
+                scs_sdk::game::ats::V1_08,
+                crate::SubscriptionRequirement::Required,
+                sys::SCS_RESULT_OK,
+                true,
+            ),
+        ];
+
+        for ((name, id, is_ats), schema, requirement, expected, registered) in cases {
+            harness().reset();
+            let owner = TestRuntimeOwner::new();
+            let runtime = owner.runtime();
+            let result = initialize_without_counts_for_game(
+                runtime,
+                TelemetryApiVersion::V1_01,
+                name,
+                id,
+                schema,
+                MandatoryBreakPlugin {
+                    requirement,
+                    ats: is_ats,
+                },
+            );
+            assert_eq!(result, expected, "{id:?} schema {schema}");
+
+            {
+                // Release the harness guard before shutdown re-enters the fake
+                // SDK, which locks the same harness to unregister channels.
+                let state = harness();
+                let mandatory_break = state
+                    .channels
+                    .iter()
+                    .find(|channel| channel.name == b"mandatory.break");
+                assert_eq!(
+                    mandatory_break.is_some(),
+                    registered,
+                    "{id:?} schema {schema}"
+                );
+                if let Some(channel) = mandatory_break {
+                    assert_eq!(channel.value_type, sys::SCS_VALUE_TYPE_S32);
+                    assert_eq!(channel.index, sys::SCS_U32_NIL);
+                }
+                if expected == sys::SCS_RESULT_OK {
+                    assert!(
+                        state
+                            .channels
+                            .iter()
+                            .any(|channel| channel.name == b"truck.speed")
+                    );
+                }
+            }
+            if expected == sys::SCS_RESULT_OK {
+                runtime.shutdown();
+            }
+            assert!(harness().channels.is_empty());
+            harness().reset();
+            drop(owner);
+        }
     }
 
     #[test]

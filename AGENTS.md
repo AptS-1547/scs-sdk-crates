@@ -10,11 +10,11 @@ existing patterns unless there is a concrete correctness reason to change them.
   Dispatch product repository.
 - Product plugins, web applications, bridges, dispatch logic, save-game logic,
   and other end-user features belong in separate repositories.
-- The current implemented scope is complete coverage of the public SCS SDK 1.14
+- The current implemented scope is complete coverage of the public SCS SDK 1.16
   Telemetry interface and the independently versioned Input API 1.00 interface.
   Keep those two lifecycle and version domains distinct; do not imply coverage
   of private game internals or future SCS interfaces.
-- The official SDK files in third-party/scs_sdk_1_14/ are the ABI and constant
+- The official SDK files in third-party/scs_sdk_1_16/ are the ABI and constant
   source of truth. Do not derive contracts from third-party Rust crates or
   existing product behavior when the official headers answer the question.
 - The codebase is pure Rust. Do not introduce a C or C++ shim, CMake, or a
@@ -179,7 +179,7 @@ worktree changes as user-owned and preserve them.
 Complete coverage requires auditable evidence, not a large list of constants.
 For changes to SDK coverage:
 
-- Compare against the official SDK 1.14 headers.
+- Compare against the official SDK 1.16 headers.
 - Preserve every public Telemetry ABI type, result code, version constant, event,
   channel, configuration ID/attribute, gameplay event/attribute, game ID, and
   game-version constant within the declared scope. Independently preserve every
@@ -195,9 +195,9 @@ For changes to SDK coverage:
 - Add or update tests for names, counts, ordering, duplicate detection, value
   types, and indexed/scalar behavior.
 - Keep the documented inventory synchronized with code. The current telemetry
-  inventory is 107 channels, 6 configuration IDs, 60 configuration attributes,
-  71 configuration-to-attribute associations, 6 gameplay events, 15 gameplay
-  attributes, and 21 gameplay-to-attribute associations.
+  inventory is 108 channels, 8 configuration IDs, 64 configuration attributes,
+  89 configuration-to-attribute associations, 8 gameplay events, 16 gameplay
+  attributes, and 28 gameplay-to-attribute associations.
 - Input coverage must remain end to end: raw ABI, safe wrapper, independent
   runtime and trait, export macro, pass/missing-trait/combined fixtures, safe
   example, documentation, Miri, and all three platform artifact checks.
@@ -276,10 +276,10 @@ For changes to SDK coverage:
 - Workspace-authored Rust code is licensed under MIT OR Apache-2.0. Keep package
   manifests, repository license files, and README statements consistent.
 - The official SCS SDK distribution remains third-party material under its own
-  license. Do not imply that files under third-party/scs_sdk_1_14/ were
+  license. Do not imply that files under third-party/scs_sdk_1_16/ were
   relicensed under the workspace license.
 - Preserve both historical SCS notices: SDK 1.0 through 1.5 use the 2013
-  copyright notice, while SDK 1.6 through 1.14 use the 2016 notice. Keep the
+  copyright notice, while SDK 1.6 through 1.16 use the 2016 notice. Keep the
   root and every public crate's LICENSE-SCS-SDK-2013 and
   LICENSE-SCS-SDK-2016 byte-identical to the tracked texts under
   third-party/scs_sdk_history/licenses/. Public package READMEs must

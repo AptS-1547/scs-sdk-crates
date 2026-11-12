@@ -3,7 +3,7 @@
 [中文](README.zh.md) | **English**
 
 `scs-sdk` is the safe, typed, `no_std` interpretation of
-[`scs-sdk-sys`](https://crates.io/crates/scs-sdk-sys) for the public telemetry and input interfaces in SCS SDK 1.14
+[`scs-sdk-sys`](https://crates.io/crates/scs-sdk-sys) for the public telemetry and input interfaces in SCS SDK 1.16
 interface. It turns the header-shaped ABI into typed Rust values, descriptors,
 catalogs, version domains, and callback-scoped SDK operations without taking
 ownership of plugin lifecycle or product state.
@@ -121,13 +121,13 @@ The complete typed telemetry inventory is:
 
 | Surface | Count |
 | --- | ---: |
-| Channels | 107 |
-| Configuration IDs | 6 |
-| Configuration attributes | 60 |
-| Configuration-to-attribute associations | 71 |
-| Gameplay events | 6 |
-| Gameplay attributes | 15 |
-| Gameplay-to-attribute associations | 21 |
+| Channels | 108 |
+| Configuration IDs | 8 |
+| Configuration attributes | 64 |
+| Configuration-to-attribute associations | 89 |
+| Gameplay events | 8 |
+| Gameplay attributes | 16 |
+| Gameplay-to-attribute associations | 28 |
 
 Documented enum-like strings also have closed known-value catalogs:
 
@@ -135,6 +135,7 @@ Documented enum-like strings also have closed known-value catalogs:
 | --- | ---: |
 | `configuration::ShifterType` | 4 |
 | `configuration::JobMarket` | 5 |
+| `configuration::CarJobMarket` | 2 |
 | `gameplay::FineOffence` | 14 |
 
 Each closed catalog exposes `ALL`, `COUNT`, `as_str`, `FromStr`, and per-value
@@ -194,9 +195,9 @@ Workspace-authored Rust code is available under either
 [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
 Typed descriptors, constants, identifiers, catalogs, schema-history metadata,
-and related documentation derived from SDK 1.0 through 1.14 retain both
+and related documentation derived from SDK 1.0 through 1.16 retain both
 original SCS Software notices: [LICENSE-SCS-SDK-2013](LICENSE-SCS-SDK-2013)
 for SDK 1.0-1.5 and [LICENSE-SCS-SDK-2016](LICENSE-SCS-SDK-2016) for SDK
-1.6-1.14. The
-[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_14.zip)
+1.6-1.16. The
+[official SDK archive](https://download.eurotrucksimulator2.com/scs_sdk_1_16.zip)
 remains third-party material and is not relicensed under the workspace license.

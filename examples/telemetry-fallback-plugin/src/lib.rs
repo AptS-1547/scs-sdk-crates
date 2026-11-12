@@ -29,7 +29,7 @@ use scs_sdk_plugin::{
 
 /// The deliberately selected fallback endpoint.
 ///
-/// SDK 1.14 defines both API 1.00 and 1.01. A current game should first call the
+/// SDK 1.16 defines both API 1.00 and 1.01. A current game should first call the
 /// export with 1.01, receive `Unsupported`, and then retry with this version.
 const ACCEPTED_FALLBACK_API: TelemetryApiVersion = TelemetryApiVersion::V1_00;
 
